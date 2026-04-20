@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: enron-hdfs-visualization-service
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+app:
+  hdfs:
+    uri: ${APP_HDFS_URI:hdfs://localhost:9000}
+    user: ${APP_HDFS_USER:}
+    configuration:
+      dfs.client.use.datanode.hostname: ${APP_HDFS_USE_DATANODE_HOSTNAME:true}
+  analytics:
+    default-max-files: ${APP_ANALYTICS_DEFAULT_MAX_FILES:5000}
+    max-files-hard-limit: ${APP_ANALYTICS_MAX_FILES_HARD_LIMIT:20000}
+    cache-ttl: ${APP_ANALYTICS_CACHE_TTL:PT10M}
+    default-top-limit: ${APP_ANALYTICS_DEFAULT_TOP_LIMIT:10}
+    default-graph-edge-limit: ${APP_ANALYTICS_DEFAULT_GRAPH_EDGE_LIMIT:50}

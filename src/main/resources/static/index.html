@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enron HDFS Visualization Service</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+<div class="page">
+    <header class="hero">
+        <h1>Enron HDFS Visualization Service</h1>
+        <p>Register an HDFS dataset, scan it, and view chart-ready analytics for Enron-style email archives.</p>
+    </header>
+
+    <section class="panel form-panel">
+        <h2>Register dataset</h2>
+        <form id="dataset-form">
+            <div class="form-grid">
+                <label>
+                    <span>Name</span>
+                    <input id="dataset-name" type="text" placeholder="enron-maildir" required>
+                </label>
+                <label>
+                    <span>HDFS path</span>
+                    <input id="dataset-path" type="text" placeholder="/datasets/enron/maildir" required>
+                </label>
+                <label>
+                    <span>Description</span>
+                    <input id="dataset-description" type="text" placeholder="Enron email corpus in HDFS">
+                </label>
+                <label>
+                    <span>Dataset type</span>
+                    <select id="dataset-type">
+                        <option value="ENRON_EMAIL">ENRON_EMAIL</option>
+                    </select>
+                </label>
+            </div>
+            <button type="submit">Register</button>
+        </form>
+        <p class="hint">Tip: point this at your Enron maildir root in HDFS.</p>
+        <div id="message" class="message"></div>
+    </section>
+
+    <section class="panel controls-panel">
+        <div class="controls-row">
+            <label>
+                <span>Dataset</span>
+                <select id="dataset-select"></select>
+            </label>
+            <label>
+                <span>Max files to scan</span>
+                <input id="max-files" type="number" min="1" value="5000">
+            </label>
+            <label class="refresh-box">
+                <span>Force refresh</span>
+                <input id="refresh-toggle" type="checkbox">
+            </label>
+            <button id="load-dashboard" type="button">Load dashboard</button>
+        </div>
+    </section>
+
+    <section id="summary" class="summary-grid"></section>
+
+    <section class="chart-grid">
+        <article class="panel">
+            <h2>Email volume by month</h2>
+            <canvas id="volume-chart"></canvas>
+        </article>
+        <article class="panel">
+            <h2>Top senders</h2>
+            <canvas id="senders-chart"></canvas>
+        </article>
+        <article class="panel">
+            <h2>Top recipients</h2>
+            <canvas id="recipients-chart"></canvas>
+        </article>
+        <article class="panel">
+            <h2>Hourly distribution (UTC)</h2>
+            <canvas id="hourly-chart"></canvas>
+        </article>
+    </section>
+
+    <section class="bottom-grid">
+        <article class="panel">
+            <h2>Top subject keywords</h2>
+            <ul id="keywords-list" class="keyword-list"></ul>
+        </article>
+        <article class="panel">
+            <h2>Communication graph edges</h2>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Source</th>
+                        <th>Target</th>
+                        <th>Count</th>
+                    </tr>
+                    </thead>
+                    <tbody id="edges-table-body"></tbody>
+                </table>
+            </div>
+        </article>
+    </section>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>
