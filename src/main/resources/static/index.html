@@ -3,15 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Enron HDFS Visualization Service</title>
+    <title>HDFS Dataset Visualization Service</title>
     <link rel="stylesheet" href="/styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 <div class="page">
     <header class="hero">
-        <h1>Enron HDFS Visualization Service</h1>
-        <p>Register an HDFS dataset, scan it, and view chart-ready analytics for Enron-style email archives.</p>
+        <h1>HDFS Dataset Visualization Service</h1>
+        <p>Register an HDFS dataset, scan it, and view chart-ready analytics for mail archive datasets.</p>
     </header>
 
     <section class="panel form-panel">
@@ -20,26 +20,26 @@
             <div class="form-grid">
                 <label>
                     <span>Name</span>
-                    <input id="dataset-name" type="text" placeholder="enron-maildir" required>
+                    <input id="dataset-name" type="text" placeholder="mail-archive" required>
                 </label>
                 <label>
                     <span>HDFS path</span>
-                    <input id="dataset-path" type="text" placeholder="/datasets/enron/maildir" required>
+                    <input id="dataset-path" type="text" placeholder="/datasets/mail-archive" required>
                 </label>
                 <label>
                     <span>Description</span>
-                    <input id="dataset-description" type="text" placeholder="Enron email corpus in HDFS">
+                    <input id="dataset-description" type="text" placeholder="Mail archive in HDFS">
                 </label>
                 <label>
                     <span>Dataset type</span>
                     <select id="dataset-type">
-                        <option value="ENRON_EMAIL">ENRON_EMAIL</option>
+                        <option value="EMAIL_ARCHIVE">EMAIL_ARCHIVE</option>
                     </select>
                 </label>
             </div>
             <button type="submit">Register</button>
         </form>
-        <p class="hint">Tip: point this at your Enron maildir root in HDFS.</p>
+        <p class="hint">Tip: point this at the root of a maildir-style archive in HDFS.</p>
         <div id="message" class="message"></div>
     </section>
 

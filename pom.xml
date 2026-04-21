@@ -12,10 +12,10 @@
     </parent>
 
     <groupId>com.example</groupId>
-    <artifactId>enron-hdfs-visualization-service</artifactId>
+    <artifactId>hdfs-dataset-visualization-service</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>enron-hdfs-visualization-service</name>
-    <description>Visualization-first Spring Boot microservice for HDFS-backed Enron email analytics</description>
+    <name>hdfs-dataset-visualization-service</name>
+    <description>Visualization-first Spring Boot microservice for HDFS-backed dataset analytics</description>
 
     <properties>
         <java.version>17</java.version>

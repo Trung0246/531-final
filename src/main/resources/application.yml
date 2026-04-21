@@ -1,6 +1,6 @@
 spring:
   application:
-    name: enron-hdfs-visualization-service
+    name: hdfs-dataset-visualization-service
 
 server:
   port: 8080

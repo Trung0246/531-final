@@ -1,12 +1,12 @@
-# Enron HDFS Visualization Service
+# HDFS Dataset Visualization Service
 
-A Spring Boot 3.x microservice that reads Enron-style email data from HDFS, parses it into a structured model, and exposes visualization-ready REST endpoints.
+A Spring Boot 3.x microservice that reads mail archive data from HDFS, parses it into a structured model, and exposes visualization-ready REST endpoints.
 
 ## Current MVP scope
 
 - Register an HDFS dataset path
 - Optionally import a local directory into HDFS
-- Parse Enron maildir-style email files
+- Parse maildir-style email files
 - Produce chart-friendly analytics:
   - email volume by month
   - hourly activity distribution
@@ -28,7 +28,7 @@ This project is intentionally **visualization-first**:
 ## Project structure
 
 ```text
-src/main/java/com/example/enronviz
+src/main/java/com/example/datasetviz
 ├── config
 ├── controller
 ├── dto
@@ -84,10 +84,10 @@ If you already have `core-site.xml` and `hdfs-site.xml` available on the runtime
 curl -X POST http://localhost:8080/api/datasets/register \
   -H 'Content-Type: application/json' \
   -d '{
-        "name": "enron-maildir",
-        "description": "Enron email corpus in HDFS",
-        "datasetType": "ENRON_EMAIL",
-        "hdfsPath": "/datasets/enron/maildir"
+        "name": "mail-archive",
+        "description": "Mail archive in HDFS",
+        "datasetType": "EMAIL_ARCHIVE",
+        "hdfsPath": "/datasets/mail-archive"
       }'
 ```
 
@@ -111,11 +111,11 @@ http://localhost:8080/
 curl -X POST http://localhost:8080/api/datasets/import-local \
   -H 'Content-Type: application/json' \
   -d '{
-        "name": "enron-maildir",
+        "name": "mail-archive",
         "description": "Imported from local filesystem",
-        "datasetType": "ENRON_EMAIL",
-        "localDirectory": "/data/enron/maildir",
-        "targetHdfsPath": "/datasets/enron/maildir"
+        "datasetType": "EMAIL_ARCHIVE",
+        "localDirectory": "/data/mail-archive",
+        "targetHdfsPath": "/datasets/mail-archive"
       }'
 ```
 
@@ -123,16 +123,45 @@ curl -X POST http://localhost:8080/api/datasets/import-local \
 
 - The dataset registry is currently in-memory.
 - Analytics are computed on demand and cached for a configurable TTL.
-- The parser is intentionally lightweight and tuned for Enron-like raw mail files.
+- The parser is intentionally lightweight and tuned for raw mail files.
 - This is an MVP for exploration and visualization, not a production evidence platform.
 
-## Run locally
+## Build the jar
 
-This repository includes a `pom.xml`, but the Maven wrapper is not bundled in this environment.
+To keep Maven downloads inside this project directory, use a project-local Maven cache and Jansi temp directory:
 
 ```bash
-mvn spring-boot:run
+mkdir -p .m2/repository .tmp/jansi
+JAVA_HOME="$(mise where java@17.0.2)" \
+MAVEN_OPTS="-Djansi.tmpdir=$PWD/.tmp/jansi" \
+mvn -Dmaven.repo.local="$PWD/.m2/repository" clean package
 ```
+
+The packaged server jar is written to:
+
+```text
+target/hdfs-dataset-visualization-service-0.0.1-SNAPSHOT.jar
+```
+
+## Start the server
+
+Start the server with the packaged jar:
+
+```bash
+APP_HDFS_URI=hdfs://localhost:9000 \
+APP_HDFS_USER=hadoop \
+java -jar target/hdfs-dataset-visualization-service-0.0.1-SNAPSHOT.jar
+```
+
+The server listens on `http://localhost:8080/` by default.
+
+Useful runtime environment variables:
+
+- `APP_HDFS_URI` defaults to `hdfs://localhost:9000`
+- `APP_HDFS_USER` defaults to empty
+- `APP_ANALYTICS_DEFAULT_MAX_FILES` defaults to `5000`
+- `APP_ANALYTICS_MAX_FILES_HARD_LIMIT` defaults to `20000`
+- `APP_ANALYTICS_CACHE_TTL` defaults to `PT10M`
 
 ## Next good improvements
 
