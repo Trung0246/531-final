@@ -178,6 +178,7 @@ public class EmailAnalyticsService {
             EmailAnalyticsSnapshot snapshot = new EmailAnalyticsSnapshot();
             snapshot.setDatasetId(dataset.getId());
             snapshot.setDatasetName(dataset.getName());
+            snapshot.setDatasetType(dataset.getDatasetType());
             snapshot.setHdfsPath(dataset.getHdfsPath());
             snapshot.setGeneratedAt(generatedAt);
             snapshot.setMaxFiles(maxFiles);

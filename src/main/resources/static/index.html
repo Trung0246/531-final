@@ -11,7 +11,7 @@
 <div class="page">
     <header class="hero">
         <h1>HDFS Dataset Visualization Service</h1>
-        <p>Register an HDFS dataset, scan it, and view chart-ready analytics for mail archive datasets.</p>
+        <p>Register an HDFS dataset, scan it, and view chart-ready analytics for mail archives and CSV reports.</p>
     </header>
 
     <section class="panel form-panel">
@@ -20,26 +20,27 @@
             <div class="form-grid">
                 <label>
                     <span>Name</span>
-                    <input id="dataset-name" type="text" placeholder="mail-archive" required>
+                    <input id="dataset-name" type="text" placeholder="dataset-name" required>
                 </label>
                 <label>
                     <span>HDFS path</span>
-                    <input id="dataset-path" type="text" placeholder="/datasets/mail-archive" required>
+                    <input id="dataset-path" type="text" placeholder="/datasets/example" required>
                 </label>
                 <label>
                     <span>Description</span>
-                    <input id="dataset-description" type="text" placeholder="Mail archive in HDFS">
+                    <input id="dataset-description" type="text" placeholder="Dataset stored in HDFS">
                 </label>
                 <label>
                     <span>Dataset type</span>
                     <select id="dataset-type">
                         <option value="EMAIL_ARCHIVE">EMAIL_ARCHIVE</option>
+                        <option value="CSV_TEXT">CSV_TEXT</option>
                     </select>
                 </label>
             </div>
             <button type="submit">Register</button>
         </form>
-        <p class="hint">Tip: point this at the root of a maildir-style archive in HDFS.</p>
+        <p class="hint">Tip: support includes maildir-style email archives and CSV reports such as public health or operations datasets.</p>
         <div id="message" class="message"></div>
     </section>
 
@@ -48,6 +49,10 @@
             <label>
                 <span>Dataset</span>
                 <select id="dataset-select"></select>
+            </label>
+            <label>
+                <span>Dataset type</span>
+                <input id="dataset-type-display" type="text" readonly>
             </label>
             <label>
                 <span>Max files to scan</span>
@@ -65,37 +70,37 @@
 
     <section class="chart-grid">
         <article class="panel">
-            <h2>Email volume by month</h2>
+            <h2 id="primary-chart-title">Email volume by month</h2>
             <canvas id="volume-chart"></canvas>
         </article>
         <article class="panel">
-            <h2>Top senders</h2>
+            <h2 id="secondary-chart-title">Top senders</h2>
             <canvas id="senders-chart"></canvas>
         </article>
         <article class="panel">
-            <h2>Top recipients</h2>
+            <h2 id="tertiary-chart-title">Top recipients</h2>
             <canvas id="recipients-chart"></canvas>
         </article>
         <article class="panel">
-            <h2>Hourly distribution (UTC)</h2>
+            <h2 id="quaternary-chart-title">Hourly distribution (UTC)</h2>
             <canvas id="hourly-chart"></canvas>
         </article>
     </section>
 
     <section class="bottom-grid">
         <article class="panel">
-            <h2>Top subject keywords</h2>
+            <h2 id="list-panel-title">Top subject keywords</h2>
             <ul id="keywords-list" class="keyword-list"></ul>
         </article>
         <article class="panel">
-            <h2>Communication graph edges</h2>
+            <h2 id="table-panel-title">Communication graph edges</h2>
             <div class="table-wrapper">
                 <table>
                     <thead>
                     <tr>
-                        <th>Source</th>
-                        <th>Target</th>
-                        <th>Count</th>
+                        <th id="table-col-1">Source</th>
+                        <th id="table-col-2">Target</th>
+                        <th id="table-col-3">Count</th>
                     </tr>
                     </thead>
                     <tbody id="edges-table-body"></tbody>

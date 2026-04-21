@@ -1,13 +1,15 @@
 # HDFS Dataset Visualization Service
 
-A Spring Boot 3.x microservice that reads mail archive data from HDFS, parses it into a structured model, and exposes visualization-ready REST endpoints.
+A Spring Boot 3.x microservice that reads HDFS-backed datasets, parses them into structured analytics, and exposes visualization-ready REST endpoints.
 
 ## Current MVP scope
 
 - Register an HDFS dataset path
 - Optionally import a local directory into HDFS
-- Parse maildir-style email files
-- Produce chart-friendly analytics:
+- Parse supported dataset types:
+  - maildir-style email archives via `EMAIL_ARCHIVE`
+  - tabular CSV reports via `CSV_TEXT`
+- Produce chart-friendly analytics for different aspects of the data:
   - email volume by month
   - hourly activity distribution
   - top senders
@@ -15,6 +17,10 @@ A Spring Boot 3.x microservice that reads mail archive data from HDFS, parses it
   - top mailbox owners
   - communication graph edges
   - top subject keywords
+  - rows by observation date for CSV datasets
+  - detected metric totals such as `Confirmed`, `Deaths`, and `Recovered`
+  - top locations by metric for CSV datasets
+  - multi-metric trend lines for CSV datasets
 - Serve a minimal dashboard at `/`
 
 ## Why this shape?
@@ -23,7 +29,7 @@ This project is intentionally **visualization-first**:
 
 - HDFS stores the raw dataset
 - Spring Boot handles ingestion, parsing, aggregation, and API delivery
-- The frontend consumes JSON that is already shaped for dashboards
+- The frontend consumes dataset-type-specific JSON that is already shaped for dashboards
 
 ## Project structure
 
@@ -58,6 +64,9 @@ src/main/java/com/example/datasetviz
 - `GET /api/datasets/{datasetId}/analytics/top-mailbox-owners`
 - `GET /api/datasets/{datasetId}/analytics/subject-keywords`
 - `GET /api/datasets/{datasetId}/analytics/communication-graph`
+
+`GET /api/datasets/{datasetId}/analytics` is the generic dashboard endpoint and supports both `EMAIL_ARCHIVE` and `CSV_TEXT` datasets.
+The detailed email-specific endpoints above remain focused on `EMAIL_ARCHIVE` datasets.
 
 ## Example configuration
 
@@ -97,6 +106,21 @@ curl -X POST http://localhost:8080/api/datasets/register \
 curl "http://localhost:8080/api/datasets/<DATASET_ID>/analytics?maxFiles=5000&refresh=true"
 ```
 
+### 2b) Register a CSV report dataset
+
+This works for CSV datasets such as the Kaggle coronavirus report when the files contain date, location, and numeric metric columns.
+
+```bash
+curl -X POST http://localhost:8080/api/datasets/register \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "name": "covid-report",
+        "description": "CSV public health report in HDFS",
+        "datasetType": "CSV_TEXT",
+        "hdfsPath": "/datasets/covid-report"
+      }'
+```
+
 ### 3) Open the dashboard
 
 Visit:
@@ -123,7 +147,8 @@ curl -X POST http://localhost:8080/api/datasets/import-local \
 
 - The dataset registry is currently in-memory.
 - Analytics are computed on demand and cached for a configurable TTL.
-- The parser is intentionally lightweight and tuned for raw mail files.
+- The email parser is intentionally lightweight and tuned for raw mail files.
+- CSV analytics currently auto-detect date, location, and numeric metric columns and work well for report-style datasets such as coronavirus case reports.
 - This is an MVP for exploration and visualization, not a production evidence platform.
 
 ## Build the jar

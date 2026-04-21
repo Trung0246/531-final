@@ -9,6 +9,7 @@ public class EmailAnalyticsSnapshot {
 
     private UUID datasetId;
     private String datasetName;
+    private DatasetType datasetType;
     private String hdfsPath;
     private Instant generatedAt;
     private int maxFiles;
@@ -35,6 +36,14 @@ public class EmailAnalyticsSnapshot {
 
     public void setDatasetName(String datasetName) {
         this.datasetName = datasetName;
+    }
+
+    public DatasetType getDatasetType() {
+        return datasetType;
+    }
+
+    public void setDatasetType(DatasetType datasetType) {
+        this.datasetType = datasetType;
     }
 
     public String getHdfsPath() {

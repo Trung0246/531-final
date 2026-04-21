@@ -2,7 +2,6 @@ package com.example.datasetviz.util;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -35,28 +34,30 @@ public final class DateParsingUtils {
                 .replaceAll("\\s+", " ");
 
         for (DateTimeFormatter formatter : FORMATTERS) {
-            try {
-                TemporalAccessor accessor = formatter.parseBest(
-                        cleaned,
-                        ZonedDateTime::from,
-                        OffsetDateTime::from,
-                        LocalDateTime::from
-                );
-
-                if (accessor instanceof ZonedDateTime zonedDateTime) {
-                    return Optional.of(zonedDateTime.toInstant());
-                }
-                if (accessor instanceof OffsetDateTime offsetDateTime) {
-                    return Optional.of(offsetDateTime.toInstant());
-                }
-                if (accessor instanceof LocalDateTime localDateTime) {
-                    return Optional.of(localDateTime.toInstant(ZoneOffset.UTC));
-                }
-            } catch (DateTimeParseException ignored) {
-                // Try next formatter.
+            Optional<Instant> parsed = tryParse(cleaned, formatter);
+            if (parsed.isPresent()) {
+                return parsed;
             }
         }
 
         return Optional.empty();
+    }
+
+    private static Optional<Instant> tryParse(String value, DateTimeFormatter formatter) {
+        try {
+            TemporalAccessor accessor = formatter.parseBest(
+                    value,
+                    ZonedDateTime::from,
+                    LocalDateTime::from
+            );
+
+            if (accessor instanceof ZonedDateTime zonedDateTime) {
+                return Optional.of(zonedDateTime.toInstant());
+            }
+            LocalDateTime localDateTime = (LocalDateTime) accessor;
+            return Optional.of(localDateTime.toInstant(ZoneOffset.UTC));
+        } catch (DateTimeParseException ignored) {
+            return Optional.empty();
+        }
     }
 }

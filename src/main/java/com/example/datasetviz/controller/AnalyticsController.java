@@ -6,6 +6,7 @@ import com.example.datasetviz.model.CommunicationEdge;
 import com.example.datasetviz.model.EmailAnalyticsSnapshot;
 import com.example.datasetviz.model.NamedCount;
 import com.example.datasetviz.model.TimeSeriesPoint;
+import com.example.datasetviz.service.DatasetAnalyticsService;
 import com.example.datasetviz.service.EmailAnalyticsService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -21,20 +22,23 @@ import java.util.UUID;
 @RequestMapping("/api/datasets/{datasetId}/analytics")
 public class AnalyticsController {
 
+    private final DatasetAnalyticsService datasetAnalyticsService;
     private final EmailAnalyticsService emailAnalyticsService;
     private final AnalyticsProperties analyticsProperties;
 
-    public AnalyticsController(EmailAnalyticsService emailAnalyticsService,
-                               AnalyticsProperties analyticsProperties) {
+    public AnalyticsController(DatasetAnalyticsService datasetAnalyticsService,
+                               EmailAnalyticsService emailAnalyticsService,
+                                AnalyticsProperties analyticsProperties) {
+        this.datasetAnalyticsService = datasetAnalyticsService;
         this.emailAnalyticsService = emailAnalyticsService;
         this.analyticsProperties = analyticsProperties;
     }
 
     @GetMapping
-    public EmailAnalyticsSnapshot analytics(@PathVariable UUID datasetId,
-                                            @RequestParam(required = false) Integer maxFiles,
-                                            @RequestParam(defaultValue = "false") boolean refresh) throws IOException {
-        return emailAnalyticsService.analyze(datasetId, maxFiles, refresh);
+    public Object analytics(@PathVariable UUID datasetId,
+                            @RequestParam(required = false) Integer maxFiles,
+                            @RequestParam(defaultValue = "false") boolean refresh) throws IOException {
+        return datasetAnalyticsService.analyze(datasetId, maxFiles, refresh);
     }
 
     @GetMapping("/overview")
