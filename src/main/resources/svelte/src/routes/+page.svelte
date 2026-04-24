@@ -71,6 +71,7 @@
 	`;
 
 	const chartModes: ChartMode[] = ['BAR', 'LINE', 'TABLE'];
+	type MessageState = { text: string; type: 'info' | 'success' | 'error' };
 
 	let datasets = $state<DatasetView[]>([]);
 	let dashboard = $state<DashboardView | null>(null);
@@ -82,7 +83,7 @@
 	let isRegistering = $state(false);
 	let isLoadingDashboard = $state(false);
 	let isLoadingDatasets = $state(false);
-	let message = $state({ text: '', type: 'info' as 'info' | 'success' | 'error' });
+	let message = $state<MessageState>({ text: '', type: 'info' });
 	let form = $state<RegisterDatasetInput>({
 		name: '',
 		description: '',
@@ -121,6 +122,13 @@
 			...chartTypeOverrides,
 			[chartId]: mode as ChartMode
 		};
+	}
+
+	function handleChartTypeChange(chartId: string, event: Event): void {
+		const target = event.currentTarget;
+		if (target instanceof HTMLSelectElement) {
+			setChartType(chartId, target.value);
+		}
 	}
 
 	function toggleChartValue(chart: DashboardChart, value: string) {
@@ -378,7 +386,7 @@
 					<div class="chart-tools">
 						<label>
 							<span>Visualization</span>
-							<select value={chartTypeOverrides[chart.id] ?? chart.type} onchange={(event) => setChartType(chart.id, (event.currentTarget as HTMLSelectElement).value)}>
+							<select value={chartTypeOverrides[chart.id] ?? chart.type} onchange={(event: Event) => handleChartTypeChange(chart.id, event)}>
 								{#each chartModes as mode}
 									<option value={mode}>{mode}</option>
 								{/each}

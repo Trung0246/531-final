@@ -21,7 +21,6 @@
 !/src/main/resources/svelte/.prettierignore
 !/src/main/resources/svelte/.prettierrc
 !/src/main/resources/svelte/eslint.config.js
-!/src/main/resources/svelte/package-lock.json
 !/src/main/resources/svelte/package.json
 !/src/main/resources/svelte/svelte.config.js
 !/src/main/resources/svelte/tsconfig.json
