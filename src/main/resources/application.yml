@@ -3,7 +3,8 @@ spring:
     name: hdfs-dataset-visualization-service
 
 server:
-  port: 8080
+  address: ${SERVER_ADDRESS:0.0.0.0}
+  port: ${SERVER_PORT:8080}
 
 management:
   endpoints:
@@ -15,6 +16,18 @@ app:
   hdfs:
     uri: ${APP_HDFS_URI:hdfs://localhost:9000}
     user: ${APP_HDFS_USER:}
+    # Optional HDFS destination prefix for imported files, e.g. /datasets/uploads.
+    # This is an HDFS path, not a local filesystem path.
+    hdfs-path: ${APP_HDFS_HDFS_PATH:}
+    # Optional allowed local root for import requests, e.g. /srv/datasets or C:/data.
+    # localDirectory must stay under this local filesystem path.
+    local-path: ${APP_HDFS_LOCAL_PATH:}
+    embedded:
+      enabled: ${APP_HDFS_EMBEDDED_ENABLED:false}
+      base-dir: ${APP_HDFS_EMBEDDED_BASE_DIR:}
+      data-nodes: ${APP_HDFS_EMBEDDED_DATA_NODES:1}
+      name-node-port: ${APP_HDFS_EMBEDDED_NAME_NODE_PORT:0}
+      format: ${APP_HDFS_EMBEDDED_FORMAT:true}
     configuration:
       dfs.client.use.datanode.hostname: ${APP_HDFS_USE_DATANODE_HOSTNAME:true}
   analytics:

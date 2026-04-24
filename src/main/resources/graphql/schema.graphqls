@@ -1,0 +1,80 @@
+type Query {
+  datasets: [Dataset!]!
+  dashboard(datasetId: ID!, maxFiles: Int, refresh: Boolean = false): DashboardSnapshot!
+}
+
+type Mutation {
+  registerDataset(input: RegisterDatasetInput!): Dataset!
+}
+
+enum DatasetType {
+  EMAIL_ARCHIVE
+  CSV_TEXT
+  GENERIC_FILES
+}
+
+input RegisterDatasetInput {
+  name: String!
+  description: String
+  datasetType: DatasetType = EMAIL_ARCHIVE
+  hdfsPath: String!
+}
+
+type Dataset {
+  id: ID!
+  name: String!
+  description: String
+  datasetType: DatasetType!
+  hdfsPath: String!
+  registeredAt: String!
+}
+
+type DashboardSnapshot {
+  datasetId: ID!
+  datasetName: String!
+  datasetType: DatasetType!
+  hdfsPath: String!
+  generatedAt: String!
+  maxFiles: Int!
+  summaryItems: [DashboardSummaryItem!]!
+  charts: [DashboardChart!]!
+  listPanel: DashboardListPanel
+  tablePanel: DashboardTablePanel
+}
+
+type DashboardSummaryItem {
+  label: String!
+  value: String!
+}
+
+type DashboardChart {
+  id: String!
+  title: String!
+  type: String!
+  series: [DashboardSeries!]!
+}
+
+type DashboardSeries {
+  name: String!
+  points: [DashboardPoint!]!
+}
+
+type DashboardPoint {
+  label: String!
+  value: Float!
+}
+
+type DashboardListPanel {
+  title: String!
+  items: [String!]!
+}
+
+type DashboardTablePanel {
+  title: String!
+  columns: [String!]!
+  rows: [DashboardTableRow!]!
+}
+
+type DashboardTableRow {
+  cells: [String!]!
+}

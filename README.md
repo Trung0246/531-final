@@ -70,18 +70,121 @@ The detailed email-specific endpoints above remain focused on `EMAIL_ARCHIVE` da
 
 ## Example configuration
 
-Update `src/main/resources/application.yml` or use environment variables:
+When running the packaged jar, the application also reads external configuration from the same directory as the jar. Place an `application.yml` beside the jar to override packaged defaults.
+You can still update `src/main/resources/application.yml` or use environment variables:
 
 ```yaml
+server:
+  address: 0.0.0.0
+  port: 8080
+
 app:
   hdfs:
-    uri: hdfs://localhost:9000
+    uri: file:///
     user: hadoop
+    # HDFS path prefix used only for imported files.
+    hdfs-path:
+    # Local filesystem root allowed for localDirectory.
+    local-path:
+    embedded:
+      enabled: false
+      base-dir:
+      data-nodes: 1
+      name-node-port: 0
+      format: true
   analytics:
     default-max-files: 5000
     cache-ttl: PT10M
     max-files-hard-limit: 20000
 ```
+
+Then start it with `java -jar hdfs-dataset-visualization-service-0.0.1-SNAPSHOT.jar`.
+
+The dashboard is served by the same Spring Boot app, so the frontend URL is controlled by `server.address` and `server.port`.
+
+- `0.0.0.0` listens on all IPv4 interfaces
+- `"::"` listens on the IPv6 unspecified address
+- `127.0.0.1` or a specific LAN IP binds to one interface only
+
+Example external config beside the jar:
+
+```yaml
+server:
+  address: 0.0.0.0
+  port: 9090
+```
+
+IPv6 example:
+
+```yaml
+server:
+  address: "::"
+  port: 8080
+```
+
+`app.hdfs.uri` controls which filesystem backend the app talks to.
+
+- `file:///` means single-machine local filesystem mode and does not require Hadoop daemons
+- `hdfs://host:port` means external HDFS mode and requires a reachable NameNode
+- `app.hdfs.embedded.enabled=true` starts an in-process mini HDFS cluster for development using the same app process
+
+`app.hdfs.uri` and `app.hdfs.hdfs-path` are filesystem destination settings, not local import-source settings.
+
+- `app.hdfs.uri` should point to the reachable HDFS NameNode, for example `hdfs://192.168.1.143:9000`
+- `app.hdfs.hdfs-path` is an optional base HDFS directory used only when importing local files into HDFS
+- `app.hdfs.local-path` is an optional allowed local root for `localDirectory`; imports outside that root are rejected
+- If you do not want a global import prefix, leave `app.hdfs.hdfs-path` empty
+- If you want chroot-like import restrictions, set `app.hdfs.local-path` to the only local root that imports may read from
+- Local machine paths belong in the `localDirectory` field of the `/api/datasets/import-local` request, not in `app.hdfs.hdfs-path`
+
+Examples:
+
+```yaml
+app:
+  hdfs:
+    uri: file:///
+    hdfs-path: /mnt/main/trung/Other/Project/_edu_/CSPC531/final/data/datasets
+    local-path: /mnt/main/trung/Other/Project/_edu_/CSPC531/final/data
+```
+
+Local single-machine mode above needs no external HDFS service.
+
+```yaml
+app:
+  hdfs:
+    uri: hdfs://192.168.1.143:9000
+    hdfs-path: /datasets/uploads
+    local-path: /mnt/main/trung/Other/Project/_edu_/CSPC531/final/data
+```
+
+Remote HDFS mode above needs a running NameNode at `192.168.1.143:9000`.
+
+```yaml
+app:
+  hdfs:
+    embedded:
+      enabled: true
+      base-dir: /tmp/datasetviz-hdfs
+      data-nodes: 1
+      name-node-port: 52000
+```
+
+Embedded mode is development-oriented and starts a mini HDFS cluster inside the application process.
+
+`hdfs-path: /datasets/uploads` means imported files are written under that path in the selected filesystem backend.
+
+`local-path: /mnt/main/trung/Other/Project/_edu_/CSPC531/final/data` means the API will only allow `localDirectory` values under that folder on the server machine.
+
+Wrong:
+
+```yaml
+app:
+  hdfs:
+    hdfs-path: /mnt/main/trung/Other/Project/_edu_/CSPC531/final/data
+```
+
+That points `hdfs-path` at a local disk path, which is not what this setting means.
+
 
 If you already have `core-site.xml` and `hdfs-site.xml` available on the runtime classpath, Hadoop's `Configuration` will pick them up as well.
 
@@ -173,17 +276,53 @@ target/hdfs-dataset-visualization-service-0.0.1-SNAPSHOT.jar
 Start the server with the packaged jar:
 
 ```bash
+SERVER_ADDRESS=0.0.0.0 \
+SERVER_PORT=8080 \
 APP_HDFS_URI=hdfs://localhost:9000 \
 APP_HDFS_USER=hadoop \
 java -jar target/hdfs-dataset-visualization-service-0.0.1-SNAPSHOT.jar
 ```
 
-The server listens on `http://localhost:8080/` by default.
+If you run it on the same machine, open `http://localhost:8080/` by default.
+If you change the port, use that port instead. If you bind to `0.0.0.0` or `::`, open the app with the machine's reachable hostname or IP.
+
+## Windows Hadoop warning
+
+If you run the jar on Windows, Hadoop may log warnings about `HADOOP_HOME` or `hadoop.home.dir` not being set. That warning comes from the Hadoop client runtime, not from the dashboard code itself.
+
+- On Linux and macOS, you usually do not need to set these values.
+- On Windows, the warning is commonly caused by missing Hadoop Windows helpers such as `winutils.exe`.
+- If the app can still connect to HDFS and your requests work, the warning is often non-fatal.
+
+To remove the warning on Windows, install matching Hadoop client binaries and point both `HADOOP_HOME` and `hadoop.home.dir` to that folder.
+
+PowerShell example:
+
+```powershell
+$env:HADOOP_HOME = 'C:\hadoop\hadoop-3.5.0'
+java -Dhadoop.home.dir=$env:HADOOP_HOME -jar target/hdfs-dataset-visualization-service-0.0.1-SNAPSHOT.jar
+```
+
+The directory should contain `bin/winutils.exe`.
+
+## Running the client
+
+There is no separate frontend build or client dev server in this project.
+
+- The UI files live in `src/main/resources/static/`
+- Spring Boot serves them automatically
+- After starting the backend, open `http://localhost:8080/`
+
+If you want to serve the static files separately, you would need your own static web server plus an API proxy or client-side API base URL changes, because `app.js` currently calls relative `/api/...` endpoints.
 
 Useful runtime environment variables:
 
+- `SERVER_ADDRESS` defaults to `0.0.0.0`
+- `SERVER_PORT` defaults to `8080`
 - `APP_HDFS_URI` defaults to `hdfs://localhost:9000`
 - `APP_HDFS_USER` defaults to empty
+- `APP_HDFS_HDFS_PATH` defaults to empty
+- `APP_HDFS_LOCAL_PATH` defaults to empty
 - `APP_ANALYTICS_DEFAULT_MAX_FILES` defaults to `5000`
 - `APP_ANALYTICS_MAX_FILES_HARD_LIMIT` defaults to `20000`
 - `APP_ANALYTICS_CACHE_TTL` defaults to `PT10M`

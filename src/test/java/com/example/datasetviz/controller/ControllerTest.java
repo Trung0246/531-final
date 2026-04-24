@@ -1,6 +1,8 @@
 package com.example.datasetviz.controller;
 
 import com.example.datasetviz.config.AnalyticsProperties;
+import com.example.datasetviz.dto.DashboardView;
+import com.example.datasetviz.dto.DatasetView;
 import com.example.datasetviz.dto.ImportLocalDirectoryRequest;
 import com.example.datasetviz.dto.RegisterDatasetRequest;
 import com.example.datasetviz.model.AnalyticsOverview;
@@ -11,6 +13,7 @@ import com.example.datasetviz.model.EmailAnalyticsSnapshot;
 import com.example.datasetviz.model.HdfsFileDescriptor;
 import com.example.datasetviz.model.NamedCount;
 import com.example.datasetviz.model.TimeSeriesPoint;
+import com.example.datasetviz.service.DashboardViewService;
 import com.example.datasetviz.service.DatasetAnalyticsService;
 import com.example.datasetviz.service.DatasetImportService;
 import com.example.datasetviz.service.DatasetRegistryService;
@@ -115,6 +118,54 @@ class ControllerTest {
         when(controllerHdfs(controller).exists("/missing")).thenReturn(false);
 
         assertThatThrownBy(() -> controller.register(request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("HDFS path does not exist");
+    }
+
+    @Test
+    void datasetGraphqlControllerQueriesAndMutates() throws Exception {
+        DatasetRegistryService datasetRegistryService = mock(DatasetRegistryService.class);
+        DatasetAnalyticsService datasetAnalyticsService = mock(DatasetAnalyticsService.class);
+        DashboardViewService dashboardViewService = mock(DashboardViewService.class);
+        HdfsStorageService hdfsStorageService = mock(HdfsStorageService.class);
+        DatasetGraphqlController controller = new DatasetGraphqlController(datasetRegistryService, datasetAnalyticsService, dashboardViewService, hdfsStorageService);
+
+        UUID datasetId = UUID.randomUUID();
+        DatasetRegistration registration = new DatasetRegistration(datasetId, "dataset", "desc", DatasetType.EMAIL_ARCHIVE, "/path", Instant.now());
+        DatasetView datasetView = new DatasetView(datasetId.toString(), "dataset", "desc", DatasetType.EMAIL_ARCHIVE, "/path", "2024-01-01T00:00:00Z");
+        DashboardView dashboardView = new DashboardView(
+                datasetId.toString(),
+                "dataset",
+                DatasetType.EMAIL_ARCHIVE,
+                "/path",
+                "2024-01-01T00:00:00Z",
+                10,
+                List.of(new DashboardView.SummaryItem("Dataset", "dataset")),
+                List.of(),
+                null,
+                null
+        );
+        Object snapshot = new Object();
+        RegisterDatasetRequest request = new RegisterDatasetRequest();
+        request.setName("dataset");
+        request.setDatasetType(DatasetType.EMAIL_ARCHIVE);
+        request.setHdfsPath("/path");
+
+        when(datasetRegistryService.listAll()).thenReturn(List.of(registration));
+        when(dashboardViewService.toDatasetView(registration)).thenReturn(datasetView);
+        when(datasetAnalyticsService.analyze(datasetId, null, false)).thenReturn(snapshot);
+        when(dashboardViewService.toDashboardView(snapshot)).thenReturn(dashboardView);
+        when(hdfsStorageService.exists("/path")).thenReturn(true);
+        when(datasetRegistryService.register(request)).thenReturn(registration);
+
+        assertThat(controller.datasets()).containsExactly(datasetView);
+        assertThat(controller.dashboard(datasetId.toString(), null, null)).isSameAs(dashboardView);
+        assertThat(controller.registerDataset(request)).isSameAs(datasetView);
+
+        RegisterDatasetRequest missing = new RegisterDatasetRequest();
+        missing.setHdfsPath("/missing");
+        when(hdfsStorageService.exists("/missing")).thenReturn(false);
+        assertThatThrownBy(() -> controller.registerDataset(missing))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("HDFS path does not exist");
     }
