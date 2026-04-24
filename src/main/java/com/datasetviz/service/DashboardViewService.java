@@ -32,13 +32,18 @@ public class DashboardViewService {
     }
 
     public DatasetView toDatasetView(DatasetRegistration registration) {
+        return toDatasetView(registration, null);
+    }
+
+    public DatasetView toDatasetView(DatasetRegistration registration, Boolean hdfsPathAlreadyExisted) {
         return new DatasetView(
                 registration.getId().toString(),
                 registration.getName(),
                 registration.getDescription(),
                 registration.getDatasetType(),
                 registration.getHdfsPath(),
-                formatInstant(registration.getRegisteredAt())
+                formatInstant(registration.getRegisteredAt()),
+                hdfsPathAlreadyExisted
         );
     }
 

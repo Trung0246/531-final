@@ -42,6 +42,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ControllerTest {
@@ -97,7 +98,7 @@ class ControllerTest {
 
         when(hdfsStorageService.exists("/path")).thenReturn(true);
         when(datasetRegistryService.register(registerRequest)).thenReturn(registration);
-        when(datasetImportService.importLocalDirectory(importRequest)).thenReturn(registration);
+        when(datasetImportService.importLocalDirectory(importRequest)).thenReturn(List.of(descriptor));
         when(datasetRegistryService.listAll()).thenReturn(List.of(registration));
         when(datasetRegistryService.getRequired(datasetId)).thenReturn(registration);
         when(hdfsStorageService.listFiles("/path", false, 1)).thenReturn(List.of(descriptor));
@@ -105,21 +106,22 @@ class ControllerTest {
         assertThat(controller.register(registerRequest).getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(controller.register(registerRequest).getBody()).isSameAs(registration);
         assertThat(controller.importLocal(importRequest).getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(controller.importLocal(importRequest).getBody()).containsExactly(descriptor);
         assertThat(controller.listDatasets()).containsExactly(registration);
         assertThat(controller.getDataset(datasetId)).isSameAs(registration);
         assertThat(controller.listFiles(datasetId, 0, false)).containsExactly(descriptor);
     }
 
     @Test
-    void datasetControllerRejectsMissingHdfsPath() throws Exception {
+    void datasetControllerCreatesMissingHdfsPath() throws Exception {
         DatasetController controller = new DatasetController(mock(DatasetRegistryService.class), mock(DatasetImportService.class), mock(HdfsStorageService.class));
         RegisterDatasetRequest request = new RegisterDatasetRequest();
         request.setHdfsPath("/missing");
         when(controllerHdfs(controller).exists("/missing")).thenReturn(false);
 
-        assertThatThrownBy(() -> controller.register(request))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("HDFS path does not exist");
+        controller.register(request);
+
+        verify(controllerHdfs(controller)).createDirectories("/missing");
     }
 
     @Test
@@ -132,7 +134,7 @@ class ControllerTest {
 
         UUID datasetId = UUID.randomUUID();
         DatasetRegistration registration = new DatasetRegistration(datasetId, "dataset", "desc", DatasetType.EMAIL_ARCHIVE, "/path", Instant.now());
-        DatasetView datasetView = new DatasetView(datasetId.toString(), "dataset", "desc", DatasetType.EMAIL_ARCHIVE, "/path", "2024-01-01T00:00:00Z");
+        DatasetView datasetView = new DatasetView(datasetId.toString(), "dataset", "desc", DatasetType.EMAIL_ARCHIVE, "/path", "2024-01-01T00:00:00Z", true);
         DashboardView dashboardView = new DashboardView(
                 datasetId.toString(),
                 "dataset",
@@ -157,17 +159,11 @@ class ControllerTest {
         when(dashboardViewService.toDashboardView(snapshot)).thenReturn(dashboardView);
         when(hdfsStorageService.exists("/path")).thenReturn(true);
         when(datasetRegistryService.register(request)).thenReturn(registration);
+        when(dashboardViewService.toDatasetView(registration, true)).thenReturn(datasetView);
 
         assertThat(controller.datasets()).containsExactly(datasetView);
         assertThat(controller.dashboard(datasetId.toString(), null, null)).isSameAs(dashboardView);
         assertThat(controller.registerDataset(request)).isSameAs(datasetView);
-
-        RegisterDatasetRequest missing = new RegisterDatasetRequest();
-        missing.setHdfsPath("/missing");
-        when(hdfsStorageService.exists("/missing")).thenReturn(false);
-        assertThatThrownBy(() -> controller.registerDataset(missing))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("HDFS path does not exist");
     }
 
     @Test

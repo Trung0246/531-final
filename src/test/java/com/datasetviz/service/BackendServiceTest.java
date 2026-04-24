@@ -21,12 +21,13 @@ import com.datasetviz.model.TimeSeriesPoint;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.FSDataInputStream;
+import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.LocatedFileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.RemoteIterator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.mockito.ArgumentCaptor;
+import org.springframework.mock.web.MockMultipartFile;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -88,27 +89,22 @@ class BackendServiceTest {
         DatasetRegistryService datasetRegistryService = mock(DatasetRegistryService.class);
         DatasetImportService service = new DatasetImportService(hdfsStorageService, datasetRegistryService, new HdfsProperties());
 
+        UUID datasetId = UUID.randomUUID();
+        DatasetRegistration registration = new DatasetRegistration(datasetId, "dataset", "description", DatasetType.CSV_TEXT, "/datasets/import", Instant.now());
+        HdfsFileDescriptor descriptor = new HdfsFileDescriptor("/datasets/import/nested/data.txt", "data.txt", false, 5L, Instant.now());
         ImportLocalDirectoryRequest request = new ImportLocalDirectoryRequest();
-        request.setName("dataset");
-        request.setDescription("description");
-        request.setDatasetType(DatasetType.CSV_TEXT);
+        request.setDatasetId(datasetId);
         request.setLocalDirectory(tempDir.toString());
-        request.setTargetHdfsPath("/datasets/import");
+        request.setTargetSubdirectory("");
 
-        DatasetRegistration registration = new DatasetRegistration(UUID.randomUUID(), "dataset", "description", DatasetType.CSV_TEXT, "/datasets/import", Instant.now());
-        when(datasetRegistryService.register(any(RegisterDatasetRequest.class))).thenReturn(registration);
+        when(datasetRegistryService.getRequired(datasetId)).thenReturn(registration);
+        when(hdfsStorageService.listFiles("/datasets/import", true, 500)).thenReturn(List.of(descriptor));
 
-        DatasetRegistration result = service.importLocalDirectory(request);
+        List<HdfsFileDescriptor> result = service.importLocalDirectory(request);
 
-        assertThat(result).isSameAs(registration);
+        assertThat(result).containsExactly(descriptor);
         verify(hdfsStorageService).createDirectories("/datasets/import");
         verify(hdfsStorageService).copyLocalFileToHdfs(file, "/datasets/import/nested/data.txt");
-
-        ArgumentCaptor<RegisterDatasetRequest> captor = ArgumentCaptor.forClass(RegisterDatasetRequest.class);
-        verify(datasetRegistryService).register(captor.capture());
-        assertThat(captor.getValue().getName()).isEqualTo("dataset");
-        assertThat(captor.getValue().getDatasetType()).isEqualTo(DatasetType.CSV_TEXT);
-        assertThat(captor.getValue().getHdfsPath()).isEqualTo("/datasets/import");
     }
 
     @Test
@@ -123,33 +119,53 @@ class BackendServiceTest {
     }
 
     @Test
-    void datasetImportServicePrefixesConfiguredPath(@TempDir java.nio.file.Path tempDir) throws Exception {
+    void datasetImportServiceImportsIntoTargetSubdirectory(@TempDir java.nio.file.Path tempDir) throws Exception {
         java.nio.file.Path file = Files.writeString(tempDir.resolve("data.txt"), "hello");
 
         HdfsStorageService hdfsStorageService = mock(HdfsStorageService.class);
         DatasetRegistryService datasetRegistryService = mock(DatasetRegistryService.class);
-        HdfsProperties hdfsProperties = new HdfsProperties();
-        hdfsProperties.setHdfsPath("/configured/imports");
-        DatasetImportService service = new DatasetImportService(hdfsStorageService, datasetRegistryService, hdfsProperties);
+        DatasetImportService service = new DatasetImportService(hdfsStorageService, datasetRegistryService, new HdfsProperties());
+        UUID datasetId = UUID.randomUUID();
+        DatasetRegistration registration = new DatasetRegistration(datasetId, "dataset", "", DatasetType.CSV_TEXT, "/datasets/import", Instant.now());
 
         ImportLocalDirectoryRequest request = new ImportLocalDirectoryRequest();
-        request.setName("dataset");
-        request.setDatasetType(DatasetType.CSV_TEXT);
+        request.setDatasetId(datasetId);
         request.setLocalDirectory(tempDir.toString());
-        request.setTargetHdfsPath("project-a");
+        request.setTargetSubdirectory("project-a");
 
-        DatasetRegistration registration = new DatasetRegistration(UUID.randomUUID(), "dataset", "", DatasetType.CSV_TEXT, "/configured/imports/project-a", Instant.now());
-        when(datasetRegistryService.register(any(RegisterDatasetRequest.class))).thenReturn(registration);
+        when(datasetRegistryService.getRequired(datasetId)).thenReturn(registration);
+        when(hdfsStorageService.listFiles("/datasets/import", true, 500)).thenReturn(List.of());
 
-        DatasetRegistration result = service.importLocalDirectory(request);
+        List<HdfsFileDescriptor> result = service.importLocalDirectory(request);
 
-        assertThat(result).isSameAs(registration);
-        verify(hdfsStorageService).createDirectories("/configured/imports/project-a");
-        verify(hdfsStorageService).copyLocalFileToHdfs(file, "/configured/imports/project-a/data.txt");
+        assertThat(result).isEmpty();
+        verify(hdfsStorageService).createDirectories("/datasets/import/project-a");
+        verify(hdfsStorageService).copyLocalFileToHdfs(file, "/datasets/import/project-a/data.txt");
+    }
 
-        ArgumentCaptor<RegisterDatasetRequest> captor = ArgumentCaptor.forClass(RegisterDatasetRequest.class);
-        verify(datasetRegistryService).register(captor.capture());
-        assertThat(captor.getValue().getHdfsPath()).isEqualTo("/configured/imports/project-a");
+    @Test
+    void datasetImportServiceImportsRemoteFilesAndDeletesDatasetFiles() throws Exception {
+        HdfsStorageService hdfsStorageService = mock(HdfsStorageService.class);
+        DatasetRegistryService datasetRegistryService = mock(DatasetRegistryService.class);
+        DatasetImportService service = new DatasetImportService(hdfsStorageService, datasetRegistryService, new HdfsProperties());
+        UUID datasetId = UUID.randomUUID();
+        DatasetRegistration registration = new DatasetRegistration(datasetId, "dataset", "", DatasetType.CSV_TEXT, "/datasets/import", Instant.now());
+        HdfsFileDescriptor descriptor = new HdfsFileDescriptor("/datasets/import/uploads/data.csv", "data.csv", false, 5L, Instant.now());
+        MockMultipartFile file = new MockMultipartFile("files", "data.csv", "text/csv", "a,b".getBytes(StandardCharsets.UTF_8));
+
+        when(datasetRegistryService.getRequired(datasetId)).thenReturn(registration);
+        when(hdfsStorageService.listFiles("/datasets/import", true, 500)).thenReturn(List.of(descriptor));
+        when(hdfsStorageService.delete("/datasets/import/uploads/data.csv")).thenReturn(true);
+
+        List<HdfsFileDescriptor> result = service.importRemoteFiles(datasetId, new MockMultipartFile[]{file}, "uploads");
+
+        assertThat(result).containsExactly(descriptor);
+        verify(hdfsStorageService).createDirectories("/datasets/import/uploads");
+        verify(hdfsStorageService).writeToHdfs(any(InputStream.class), eq("/datasets/import/uploads/data.csv"));
+        assertThat(service.deleteDatasetFile(datasetId, "/datasets/import/uploads/data.csv")).isTrue();
+        assertThatThrownBy(() -> service.deleteDatasetFile(datasetId, "/datasets/import"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("under dataset root");
     }
 
     @Test
@@ -159,9 +175,14 @@ class BackendServiceTest {
 
         HdfsProperties hdfsProperties = new HdfsProperties();
         hdfsProperties.setLocalPath(allowedRoot.toString());
-        DatasetImportService service = new DatasetImportService(mock(HdfsStorageService.class), mock(DatasetRegistryService.class), hdfsProperties);
+        DatasetRegistryService datasetRegistryService = mock(DatasetRegistryService.class);
+        DatasetImportService service = new DatasetImportService(mock(HdfsStorageService.class), datasetRegistryService, hdfsProperties);
+
+        UUID datasetId = UUID.randomUUID();
+        when(datasetRegistryService.getRequired(datasetId)).thenReturn(new DatasetRegistration(datasetId, "dataset", "", DatasetType.CSV_TEXT, "/datasets/import", Instant.now()));
 
         ImportLocalDirectoryRequest request = new ImportLocalDirectoryRequest();
+        request.setDatasetId(datasetId);
         request.setLocalDirectory(outsideRoot.toString());
 
         assertThatThrownBy(() -> service.importLocalDirectory(request))
@@ -181,18 +202,19 @@ class BackendServiceTest {
         hdfsProperties.setLocalPath(allowedRoot.toString());
         DatasetImportService service = new DatasetImportService(hdfsStorageService, datasetRegistryService, hdfsProperties);
 
+        UUID datasetId = UUID.randomUUID();
+        DatasetRegistration registration = new DatasetRegistration(datasetId, "dataset", "", DatasetType.CSV_TEXT, "/datasets/import", Instant.now());
+        when(datasetRegistryService.getRequired(datasetId)).thenReturn(registration);
+        when(hdfsStorageService.listFiles("/datasets/import", true, 500)).thenReturn(List.of());
+
         ImportLocalDirectoryRequest request = new ImportLocalDirectoryRequest();
-        request.setName("dataset");
-        request.setDatasetType(DatasetType.CSV_TEXT);
+        request.setDatasetId(datasetId);
         request.setLocalDirectory(nestedDirectory.toString());
-        request.setTargetHdfsPath("/datasets/import");
+        request.setTargetSubdirectory("");
 
-        DatasetRegistration registration = new DatasetRegistration(UUID.randomUUID(), "dataset", "", DatasetType.CSV_TEXT, "/datasets/import", Instant.now());
-        when(datasetRegistryService.register(any(RegisterDatasetRequest.class))).thenReturn(registration);
+        List<HdfsFileDescriptor> result = service.importLocalDirectory(request);
 
-        DatasetRegistration result = service.importLocalDirectory(request);
-
-        assertThat(result).isSameAs(registration);
+        assertThat(result).isEmpty();
         verify(hdfsStorageService).copyLocalFileToHdfs(file, "/datasets/import/data.txt");
     }
 
@@ -289,6 +311,9 @@ class BackendServiceTest {
 
         when(fileSystem.exists(new Path("/datasets/data"))).thenReturn(true);
         when(fileSystem.open(new Path("/datasets/data/file.txt"))).thenReturn(inputStream);
+        FSDataOutputStream outputStream = mock(FSDataOutputStream.class);
+        when(fileSystem.create(new Path("/datasets/data/upload.txt"), true)).thenReturn(outputStream);
+        when(fileSystem.delete(new Path("/datasets/data/upload.txt"), true)).thenReturn(true);
 
         assertThat(service.exists("/datasets/data")).isTrue();
         service.createDirectories("/datasets/data");
@@ -301,6 +326,10 @@ class BackendServiceTest {
         service.copyLocalFileToHdfs(localFile, "/");
         verify(fileSystem, never()).mkdirs(new Path("/"));
         verify(fileSystem, times(2)).copyFromLocalFile(eq(false), eq(true), any(Path.class), any(Path.class));
+
+        service.writeToHdfs(new ByteArrayInputStream("content".getBytes(StandardCharsets.UTF_8)), "/datasets/data/upload.txt");
+        verify(fileSystem, times(3)).mkdirs(new Path("/datasets/data"));
+        assertThat(service.delete("/datasets/data/upload.txt")).isTrue();
 
         assertThat(service.open("/datasets/data/file.txt")).isSameAs(inputStream);
     }

@@ -8,6 +8,7 @@ export interface DatasetView {
 	datasetType: DatasetType;
 	hdfsPath: string;
 	registeredAt: string;
+	hdfsPathAlreadyExisted: boolean | null;
 }
 
 export interface DashboardSummaryItem {
@@ -65,4 +66,18 @@ export interface RegisterDatasetInput {
 	description: string;
 	datasetType: DatasetType;
 	hdfsPath: string;
+}
+
+export interface ImportLocalDirectoryInput {
+	datasetId: string;
+	localDirectory: string;
+	targetSubdirectory: string;
+}
+
+export interface HdfsFileDescriptor {
+	path: string;
+	name: string;
+	directory: boolean;
+	length: number;
+	modificationTime: string;
 }

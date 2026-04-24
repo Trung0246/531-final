@@ -3,6 +3,7 @@ package com.datasetviz.service;
 import com.datasetviz.model.HdfsFileDescriptor;
 import com.datasetviz.util.PathUtils;
 import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.LocatedFileStatus;
 import org.apache.hadoop.fs.Path;
@@ -39,6 +40,21 @@ public class HdfsStorageService {
             fileSystem.mkdirs(parent);
         }
         fileSystem.copyFromLocalFile(false, true, new Path(localPath.toUri()), targetPath);
+    }
+
+    public void writeToHdfs(InputStream inputStream, String hdfsPath) throws IOException {
+        Path targetPath = new Path(PathUtils.normalizeHdfsPath(hdfsPath));
+        Path parent = targetPath.getParent();
+        if (parent != null) {
+            fileSystem.mkdirs(parent);
+        }
+        try (FSDataOutputStream outputStream = fileSystem.create(targetPath, true)) {
+            inputStream.transferTo(outputStream);
+        }
+    }
+
+    public boolean delete(String hdfsPath) throws IOException {
+        return fileSystem.delete(new Path(PathUtils.normalizeHdfsPath(hdfsPath)), true);
     }
 
     public InputStream open(String hdfsPath) throws IOException {

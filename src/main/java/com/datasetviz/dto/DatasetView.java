@@ -8,6 +8,7 @@ public record DatasetView(
         String description,
         DatasetType datasetType,
         String hdfsPath,
-        String registeredAt
+        String registeredAt,
+        Boolean hdfsPathAlreadyExisted
 ) {
 }

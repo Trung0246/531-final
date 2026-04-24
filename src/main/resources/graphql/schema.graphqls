@@ -27,6 +27,7 @@ type Dataset {
   datasetType: DatasetType!
   hdfsPath: String!
   registeredAt: String!
+  hdfsPathAlreadyExisted: Boolean
 }
 
 type DashboardSnapshot {

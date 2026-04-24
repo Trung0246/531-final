@@ -53,9 +53,11 @@ public class DatasetGraphqlController {
 
     @MutationMapping
     public DatasetView registerDataset(@Argument("input") @Valid RegisterDatasetRequest input) throws IOException {
-        if (!hdfsStorageService.exists(input.getHdfsPath())) {
-            throw new IllegalArgumentException("HDFS path does not exist: " + input.getHdfsPath());
+        boolean hdfsPathAlreadyExisted = hdfsStorageService.exists(input.getHdfsPath());
+        if (!hdfsPathAlreadyExisted) {
+            hdfsStorageService.createDirectories(input.getHdfsPath());
         }
-        return dashboardViewService.toDatasetView(datasetRegistryService.register(input));
+        return dashboardViewService.toDatasetView(datasetRegistryService.register(input), hdfsPathAlreadyExisted);
     }
+
 }

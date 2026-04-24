@@ -10,6 +10,7 @@ import com.datasetviz.service.HdfsStorageService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -17,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.util.List;
@@ -41,16 +43,29 @@ public class DatasetController {
     @PostMapping("/register")
     public ResponseEntity<DatasetRegistration> register(@Valid @RequestBody RegisterDatasetRequest request) throws IOException {
         if (!hdfsStorageService.exists(request.getHdfsPath())) {
-            throw new IllegalArgumentException("HDFS path does not exist: " + request.getHdfsPath());
+            hdfsStorageService.createDirectories(request.getHdfsPath());
         }
         DatasetRegistration registration = datasetRegistryService.register(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(registration);
     }
 
     @PostMapping("/import-local")
-    public ResponseEntity<DatasetRegistration> importLocal(@Valid @RequestBody ImportLocalDirectoryRequest request) throws IOException {
-        DatasetRegistration registration = datasetImportService.importLocalDirectory(request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(registration);
+    public ResponseEntity<List<HdfsFileDescriptor>> importLocal(@Valid @RequestBody ImportLocalDirectoryRequest request) throws IOException {
+        return ResponseEntity.status(HttpStatus.CREATED).body(datasetImportService.importLocalDirectory(request));
+    }
+
+    @PostMapping("/{datasetId}/import-remote")
+    public ResponseEntity<List<HdfsFileDescriptor>> importRemote(@PathVariable UUID datasetId,
+                                                                 @RequestParam("files") MultipartFile[] files,
+                                                                 @RequestParam(required = false) String targetSubdirectory) throws IOException {
+        return ResponseEntity.status(HttpStatus.CREATED).body(datasetImportService.importRemoteFiles(datasetId, files, targetSubdirectory));
+    }
+
+    @DeleteMapping("/{datasetId}/files")
+    public ResponseEntity<Void> deleteFile(@PathVariable UUID datasetId,
+                                           @RequestParam String path) throws IOException {
+        boolean deleted = datasetImportService.deleteDatasetFile(datasetId, path);
+        return deleted ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
     }
 
     @GetMapping

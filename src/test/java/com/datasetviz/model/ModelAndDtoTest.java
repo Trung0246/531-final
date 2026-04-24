@@ -214,17 +214,13 @@ class ModelAndDtoTest {
         assertThat(registerRequest.getHdfsPath()).isEqualTo("/datasets/csv");
 
         ImportLocalDirectoryRequest importRequest = new ImportLocalDirectoryRequest();
-        assertThat(importRequest.getDatasetType()).isEqualTo(DatasetType.EMAIL_ARCHIVE);
-        importRequest.setName("import");
-        importRequest.setDescription("description");
-        importRequest.setDatasetType(DatasetType.GENERIC_FILES);
+        UUID importDatasetId = UUID.randomUUID();
+        importRequest.setDatasetId(importDatasetId);
         importRequest.setLocalDirectory("/tmp/data");
-        importRequest.setTargetHdfsPath("/datasets/import");
-        assertThat(importRequest.getName()).isEqualTo("import");
-        assertThat(importRequest.getDescription()).isEqualTo("description");
-        assertThat(importRequest.getDatasetType()).isEqualTo(DatasetType.GENERIC_FILES);
+        importRequest.setTargetSubdirectory("incoming");
+        assertThat(importRequest.getDatasetId()).isEqualTo(importDatasetId);
         assertThat(importRequest.getLocalDirectory()).isEqualTo("/tmp/data");
-        assertThat(importRequest.getTargetHdfsPath()).isEqualTo("/datasets/import");
+        assertThat(importRequest.getTargetSubdirectory()).isEqualTo("incoming");
 
         HdfsProperties hdfsProperties = new HdfsProperties();
         hdfsProperties.setUri("hdfs://custom:9000");

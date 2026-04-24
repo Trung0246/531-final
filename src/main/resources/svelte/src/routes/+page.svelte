@@ -2,7 +2,15 @@
 	import { onMount } from 'svelte';
 	import ChartPanel from '$lib/components/ChartPanel.svelte';
 	import { graphqlRequest } from '$lib/graphql';
-	import type { ChartMode, DashboardChart, DashboardView, DatasetView, RegisterDatasetInput } from '$lib/types';
+	import type {
+		ChartMode,
+		DashboardChart,
+		DashboardView,
+		DatasetView,
+		HdfsFileDescriptor,
+		ImportLocalDirectoryInput,
+		RegisterDatasetInput
+	} from '$lib/types';
 
 	const DATASETS_QUERY = `
 		query Datasets {
@@ -13,6 +21,7 @@
 				datasetType
 				hdfsPath
 				registeredAt
+				hdfsPathAlreadyExisted
 			}
 		}
 	`;
@@ -66,6 +75,7 @@
 				datasetType
 				hdfsPath
 				registeredAt
+				hdfsPathAlreadyExisted
 			}
 		}
 	`;
@@ -74,6 +84,7 @@
 	type MessageState = { text: string; type: 'info' | 'success' | 'error' };
 
 	let datasets = $state<DatasetView[]>([]);
+	let files = $state<HdfsFileDescriptor[]>([]);
 	let dashboard = $state<DashboardView | null>(null);
 	let chartTypeOverrides = $state<Record<string, ChartMode>>({});
 	let chartFocusOverrides = $state<Record<string, string[]>>({});
@@ -81,6 +92,9 @@
 	let maxFiles = $state(5000);
 	let refresh = $state(false);
 	let isRegistering = $state(false);
+	let isImporting = $state(false);
+	let isUploading = $state(false);
+	let isDeleting = $state(false);
 	let isLoadingDashboard = $state(false);
 	let isLoadingDatasets = $state(false);
 	let message = $state<MessageState>({ text: '', type: 'info' });
@@ -90,6 +104,14 @@
 		datasetType: 'EMAIL_ARCHIVE',
 		hdfsPath: ''
 	});
+	let importForm = $state<ImportLocalDirectoryInput>({
+		datasetId: '',
+		localDirectory: '',
+		targetSubdirectory: ''
+	});
+	let remoteTargetSubdirectory = $state('');
+	let remoteFiles = $state<File[]>([]);
+	let deleteFilePath = $state('');
 
 	let selectedDataset = $derived(datasets.find((dataset) => dataset.id === selectedDatasetId) ?? null);
 
@@ -99,6 +121,26 @@
 
 	function toMessage(error: unknown) {
 		return error instanceof Error ? error.message : 'Unexpected error';
+	}
+
+	async function restRequest<T>(url: string, init: RequestInit = {}): Promise<T> {
+		const response = await fetch(url, init);
+		if (response.status === 204) {
+			return undefined as T;
+		}
+
+		const contentType = response.headers.get('content-type') ?? '';
+		const payload = contentType.includes('application/json') ? await response.json() : await response.text();
+		if (!response.ok) {
+			throw new Error(typeof payload === 'string' ? payload : payload.detail ?? response.statusText);
+		}
+		return payload as T;
+	}
+
+	function hdfsPathMessage(dataset: DatasetView, createdVerb: string) {
+		return dataset.hdfsPathAlreadyExisted
+			? `${createdVerb} ${dataset.name}. Warning: HDFS path ${dataset.hdfsPath} already existed, so existing files may be reused or overwritten by imports.`
+			: `${createdVerb} ${dataset.name}. Created HDFS path ${dataset.hdfsPath}.`;
 	}
 
 	function selectableValues(chart: DashboardChart): string[] {
@@ -183,10 +225,28 @@
 			if (datasets.length === 0) {
 				selectedDatasetId = '';
 				dashboard = null;
+				files = [];
+			}
+			if (selectedDatasetId) {
+				await loadFiles();
 			}
 		} finally {
 			isLoadingDatasets = false;
 		}
+	}
+
+	async function loadFiles() {
+		if (!selectedDatasetId) {
+			files = [];
+			return;
+		}
+		files = await restRequest<HdfsFileDescriptor[]>(`/api/datasets/${selectedDatasetId}/files?limit=200&recursive=true`);
+	}
+
+	async function handleDatasetSelectionChange() {
+		dashboard = null;
+		deleteFilePath = '';
+		await loadFiles();
 	}
 
 	async function loadDashboard() {
@@ -229,11 +289,101 @@
 				datasetType: form.datasetType,
 				hdfsPath: ''
 			};
-			setMessage(`Registered dataset ${data.registerDataset.name}.`, 'success');
+			setMessage(hdfsPathMessage(data.registerDataset, 'Registered dataset'), 'success');
 		} catch (error) {
 			setMessage(toMessage(error), 'error');
 		} finally {
 			isRegistering = false;
+		}
+	}
+
+	async function importLocalDirectory() {
+		if (!selectedDatasetId) {
+			setMessage('Create or select a dataset before importing files.', 'error');
+			return;
+		}
+		isImporting = true;
+		setMessage('Importing server directory into the selected dataset...', 'info');
+		try {
+			files = await restRequest<HdfsFileDescriptor[]>('/api/datasets/import-local', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({ ...importForm, datasetId: selectedDatasetId })
+			});
+			importForm = {
+				datasetId: selectedDatasetId,
+				localDirectory: '',
+				targetSubdirectory: importForm.targetSubdirectory
+			};
+			dashboard = null;
+			setMessage(`Imported directory into ${selectedDataset?.name ?? 'dataset'}.`, 'success');
+		} catch (error) {
+			setMessage(toMessage(error), 'error');
+		} finally {
+			isImporting = false;
+		}
+	}
+
+	function handleRemoteFileChange(event: Event) {
+		const target = event.currentTarget;
+		if (target instanceof HTMLInputElement) {
+			remoteFiles = Array.from(target.files ?? []);
+		}
+	}
+
+	async function importRemoteFiles() {
+		if (!selectedDatasetId) {
+			setMessage('Create or select a dataset before uploading files.', 'error');
+			return;
+		}
+		if (remoteFiles.length === 0) {
+			setMessage('Choose at least one file to upload.', 'error');
+			return;
+		}
+
+		isUploading = true;
+		setMessage('Uploading files into the selected dataset...', 'info');
+		try {
+			const formData = new FormData();
+			remoteFiles.forEach((file) => formData.append('files', file));
+			if (remoteTargetSubdirectory.trim()) {
+				formData.append('targetSubdirectory', remoteTargetSubdirectory.trim());
+			}
+			files = await restRequest<HdfsFileDescriptor[]>(`/api/datasets/${selectedDatasetId}/import-remote`, {
+				method: 'POST',
+				body: formData
+			});
+			dashboard = null;
+			setMessage(`Uploaded ${remoteFiles.length} file(s) into ${selectedDataset?.name ?? 'dataset'}.`, 'success');
+		} catch (error) {
+			setMessage(toMessage(error), 'error');
+		} finally {
+			isUploading = false;
+		}
+	}
+
+	async function deleteDatasetFile(path = deleteFilePath) {
+		if (!selectedDatasetId || !path) {
+			setMessage('Select a dataset file to delete.', 'error');
+			return;
+		}
+
+		isDeleting = true;
+		setMessage('Deleting dataset file...', 'info');
+		try {
+			await restRequest<void>(`/api/datasets/${selectedDatasetId}/files?path=${encodeURIComponent(path)}`, {
+				method: 'DELETE'
+			});
+			deleteFilePath = '';
+			dashboard = null;
+			await loadFiles();
+			setMessage('Deleted file from dataset.', 'success');
+		} catch (error) {
+			setMessage(toMessage(error), 'error');
+		} finally {
+			isDeleting = false;
 		}
 	}
 
@@ -280,8 +430,8 @@
 	<section class="panel control-panel">
 		<div class="panel-heading">
 			<div>
-				<p class="eyebrow">Register dataset</p>
-				<h2>GraphQL mutation</h2>
+				<p class="eyebrow">Dataset manager</p>
+				<h2>Register or select dataset</h2>
 			</div>
 			<button class="primary-button" type="button" onclick={registerDataset} disabled={isRegistering}>
 				{isRegistering ? 'Registering…' : 'Register dataset'}
@@ -295,7 +445,7 @@
 			</label>
 			<label>
 				<span>HDFS path</span>
-				<input bind:value={form.hdfsPath} placeholder="/datasets/example" required />
+				<input bind:value={form.hdfsPath} placeholder="/data/covid" required />
 			</label>
 			<label>
 				<span>Description</span>
@@ -309,63 +459,119 @@
 				</select>
 			</label>
 		</div>
-	</section>
 
-	<section class="panel control-panel">
-		<div class="panel-heading">
-			<div>
-				<p class="eyebrow">Load dashboard</p>
-				<h2>Query-driven layout</h2>
-			</div>
-			<button class="primary-button" type="button" onclick={loadDashboard} disabled={isLoadingDashboard || isLoadingDatasets}>
-				{isLoadingDashboard ? 'Loading…' : 'Load dashboard'}
-			</button>
-		</div>
-
-		<div class="form-grid compact-grid">
-			<label>
-				<span>Dataset</span>
-				<select bind:value={selectedDatasetId} disabled={datasets.length === 0}>
-					{#if datasets.length === 0}
-						<option value="">No datasets registered</option>
-					{:else}
+		{#if datasets.length > 0}
+			<div class="manager-divider"></div>
+			<div class="form-grid compact-grid">
+				<label>
+					<span>Existing dataset</span>
+					<select bind:value={selectedDatasetId} onchange={handleDatasetSelectionChange}>
 						{#each datasets as dataset}
 							<option value={dataset.id}>{dataset.name} • {dataset.datasetType}</option>
 						{/each}
-					{/if}
-				</select>
-			</label>
-			<label>
-				<span>Dataset type</span>
-				<input value={selectedDataset?.datasetType ?? ''} readonly />
-			</label>
-			<label>
-				<span>Max files</span>
-				<input bind:value={maxFiles} type="number" min="1" />
-			</label>
-			<label class="checkbox-field">
-				<input bind:checked={refresh} type="checkbox" />
-				<span>Force refresh</span>
-			</label>
-		</div>
-
-		{#if selectedDataset}
-			<div class="dataset-callout">
-				<div>
-					<span class="meta-label">Selected dataset</span>
-					<strong>{selectedDataset.name}</strong>
-				</div>
-				<div>
-					<span class="meta-label">HDFS path</span>
-					<strong>{selectedDataset.hdfsPath}</strong>
-				</div>
-				<div>
-					<span class="meta-label">Registered</span>
-					<strong>{selectedDataset.registeredAt}</strong>
-				</div>
+					</select>
+				</label>
+				<label>
+					<span>Dataset type</span>
+					<input value={selectedDataset?.datasetType ?? ''} readonly />
+				</label>
+				<label class="wide-field">
+					<span>Dataset HDFS root</span>
+					<input value={selectedDataset?.hdfsPath ?? ''} readonly />
+				</label>
 			</div>
+		{:else}
+			<div class="flow-note">Register a dataset before importing files or opening the dashboard manager.</div>
 		{/if}
 	</section>
+
+	{#if selectedDataset}
+		<section class="panel control-panel">
+			<div class="panel-heading">
+				<div>
+					<p class="eyebrow">File manager</p>
+					<h2>Import, replace, or delete files</h2>
+				</div>
+				<button class="secondary-button" type="button" onclick={loadFiles}>Refresh files</button>
+			</div>
+
+			<div class="flow-note">
+				Files are managed under <strong>{selectedDataset.hdfsPath}</strong>. Uploading or importing the same file path replaces the existing file.
+			</div>
+
+			<div class="form-grid">
+				<label>
+					<span>Server directory</span>
+					<input bind:value={importForm.localDirectory} placeholder="/path/on/server/covid" />
+				</label>
+				<label>
+					<span>Target subdirectory</span>
+					<input bind:value={importForm.targetSubdirectory} placeholder="optional/subdir" />
+				</label>
+				<div class="button-row wide-field">
+					<button class="primary-button" type="button" onclick={importLocalDirectory} disabled={isImporting}>
+						{isImporting ? 'Importing…' : 'Import server directory'}
+					</button>
+				</div>
+				<label>
+					<span>Client files</span>
+					<input type="file" multiple onchange={handleRemoteFileChange} />
+				</label>
+				<label>
+					<span>Upload subdirectory</span>
+					<input bind:value={remoteTargetSubdirectory} placeholder="optional/subdir" />
+				</label>
+				<div class="button-row wide-field">
+					<button class="primary-button" type="button" onclick={importRemoteFiles} disabled={isUploading}>
+						{isUploading ? 'Uploading…' : `Upload ${remoteFiles.length || ''} file${remoteFiles.length === 1 ? '' : 's'}`}
+					</button>
+				</div>
+			</div>
+
+			<div class="file-list">
+				<div class="file-list-heading">
+					<span>Dataset files</span>
+					<strong>{files.length}</strong>
+				</div>
+				{#if files.length === 0}
+					<p>No files imported yet.</p>
+				{:else}
+					{#each files as file}
+						<div class="file-row">
+							<div>
+								<strong>{file.name}</strong>
+								<span>{file.path}</span>
+							</div>
+							<button class="danger-button" type="button" onclick={() => deleteDatasetFile(file.path)} disabled={isDeleting}>Delete</button>
+						</div>
+					{/each}
+				{/if}
+			</div>
+		</section>
+
+		<section class="panel control-panel">
+			<div class="panel-heading">
+				<div>
+					<p class="eyebrow">Dashboard manager</p>
+					<h2>Process and visualize data</h2>
+				</div>
+				<button class="primary-button" type="button" onclick={loadDashboard} disabled={isLoadingDashboard || isLoadingDatasets}>
+					{isLoadingDashboard ? 'Loading…' : 'Load dashboard'}
+				</button>
+			</div>
+
+			<div class="form-grid compact-grid">
+				<label>
+					<span>Max files</span>
+					<input bind:value={maxFiles} type="number" min="1" />
+				</label>
+				<label class="checkbox-field">
+					<input bind:checked={refresh} type="checkbox" />
+					<span>Force refresh</span>
+				</label>
+			</div>
+		</section>
+	{/if}
 
 	<div class={`message ${message.type}`}>{message.text}</div>
 
@@ -463,12 +669,11 @@
 				</article>
 			{/if}
 		</section>
-	{:else}
+	{:else if selectedDataset}
 		<section class="panel empty-state">
 			<h2>No dashboard loaded</h2>
 			<p>
-				The new Svelte client waits for the backend to describe the summary cards and chart panels.
-				Choose a dataset and run the dashboard query when you are ready.
+				Import files if needed, then use the dashboard manager to process and visualize this dataset.
 			</p>
 		</section>
 	{/if}
@@ -537,8 +742,7 @@
 		line-height: 1.6;
 	}
 
-	.hero-meta,
-	.dataset-callout {
+	.hero-meta {
 		display: grid;
 		gap: 0.85rem;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -558,7 +762,6 @@
 	}
 
 	.hero-meta strong,
-	.dataset-callout strong,
 	.summary-card strong {
 		font-size: 1rem;
 		font-weight: 600;
@@ -585,6 +788,28 @@
 		display: grid;
 		gap: 0.9rem;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.flow-note {
+		margin: -0.2rem 0 1rem;
+		color: #aab7d8;
+		line-height: 1.5;
+	}
+
+	.manager-divider {
+		height: 1px;
+		margin: 1.2rem 0;
+		background: rgba(255, 255, 255, 0.08);
+	}
+
+	.wide-field {
+		grid-column: 1 / -1;
+	}
+
+	.button-row {
+		display: flex;
+		gap: 0.75rem;
+		align-items: center;
 	}
 
 	.compact-grid {
@@ -649,9 +874,67 @@
 		cursor: pointer;
 	}
 
-	.primary-button:disabled {
+	.secondary-button,
+	.danger-button {
+		border-radius: 999px;
+		padding: 0.75rem 1rem;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.secondary-button {
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		background: rgba(255, 255, 255, 0.04);
+		color: #dfe7ff;
+	}
+
+	.danger-button {
+		border: 1px solid rgba(255, 123, 123, 0.45);
+		background: rgba(255, 123, 123, 0.1);
+		color: #ffd1d1;
+	}
+
+	.primary-button:disabled,
+	.secondary-button:disabled,
+	.danger-button:disabled {
 		opacity: 0.65;
 		cursor: wait;
+	}
+
+	.file-list {
+		margin-top: 1.25rem;
+		display: grid;
+		gap: 0.65rem;
+	}
+
+	.file-list-heading,
+	.file-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	.file-list-heading {
+		color: #aab7d8;
+	}
+
+	.file-row {
+		padding: 0.8rem 0.9rem;
+		border-radius: 0.9rem;
+		background: rgba(255, 255, 255, 0.04);
+	}
+
+	.file-row div {
+		display: grid;
+		gap: 0.25rem;
+		min-width: 0;
+	}
+
+	.file-row span {
+		color: #8b94b4;
+		font-size: 0.82rem;
+		overflow-wrap: anywhere;
 	}
 
 	.message {
@@ -807,8 +1090,7 @@
 		.bottom-grid,
 		.compact-grid,
 		.hero,
-		.hero-meta,
-		.dataset-callout {
+		.hero-meta {
 			grid-template-columns: 1fr;
 			display: grid;
 		}
