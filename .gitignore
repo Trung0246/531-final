@@ -4,3 +4,14 @@ target/
 *.iml
 *.log
 .DS_Store
+.classpath
+.project
+.settings/
+.m2/
+.hdfs/
+src/main/resources/svelte/node_modules/
+src/main/resources/svelte/.svelte-kit/
+src/main/resources/svelte/playwright-report/
+src/main/resources/svelte/test-results/
+src/main/resources/svelte/README.md
+src/main/resources/svelte/playwright.config.ts
