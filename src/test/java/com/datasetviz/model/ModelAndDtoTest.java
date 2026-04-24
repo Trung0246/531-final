@@ -203,22 +203,21 @@ class ModelAndDtoTest {
         assertThat(snapshot.getTopLocationsByMetric()).containsExactly(metricBreakdown);
 
         RegisterDatasetRequest registerRequest = new RegisterDatasetRequest();
-        assertThat(registerRequest.getDatasetType()).isEqualTo(DatasetType.EMAIL_ARCHIVE);
         registerRequest.setName("name");
         registerRequest.setDescription("description");
-        registerRequest.setDatasetType(DatasetType.CSV_TEXT);
         registerRequest.setHdfsPath("/datasets/csv");
         assertThat(registerRequest.getName()).isEqualTo("name");
         assertThat(registerRequest.getDescription()).isEqualTo("description");
-        assertThat(registerRequest.getDatasetType()).isEqualTo(DatasetType.CSV_TEXT);
         assertThat(registerRequest.getHdfsPath()).isEqualTo("/datasets/csv");
 
         ImportLocalDirectoryRequest importRequest = new ImportLocalDirectoryRequest();
         UUID importDatasetId = UUID.randomUUID();
         importRequest.setDatasetId(importDatasetId);
+        importRequest.setDatasetType(DatasetType.CSV_TEXT);
         importRequest.setLocalDirectory("/tmp/data");
         importRequest.setTargetSubdirectory("incoming");
         assertThat(importRequest.getDatasetId()).isEqualTo(importDatasetId);
+        assertThat(importRequest.getDatasetType()).isEqualTo(DatasetType.CSV_TEXT);
         assertThat(importRequest.getLocalDirectory()).isEqualTo("/tmp/data");
         assertThat(importRequest.getTargetSubdirectory()).isEqualTo("incoming");
 

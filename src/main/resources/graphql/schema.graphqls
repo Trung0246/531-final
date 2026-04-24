@@ -16,7 +16,6 @@ enum DatasetType {
 input RegisterDatasetInput {
   name: String!
   description: String
-  datasetType: DatasetType = EMAIL_ARCHIVE
   hdfsPath: String!
 }
 

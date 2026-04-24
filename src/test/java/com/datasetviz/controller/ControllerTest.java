@@ -26,6 +26,7 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
@@ -36,8 +37,6 @@ import java.util.NoSuchElementException;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
@@ -150,7 +149,6 @@ class ControllerTest {
         Object snapshot = new Object();
         RegisterDatasetRequest request = new RegisterDatasetRequest();
         request.setName("dataset");
-        request.setDatasetType(DatasetType.EMAIL_ARCHIVE);
         request.setHdfsPath("/path");
 
         when(datasetRegistryService.listAll()).thenReturn(List.of(registration));
@@ -188,6 +186,10 @@ class ControllerTest {
         BeanPropertyBindingResult blankBindingResult = new BeanPropertyBindingResult(new Object(), "target");
         ProblemDetail blankValidation = handler.handleValidation(new MethodArgumentNotValidException(sampleMethodParameter(), blankBindingResult));
         assertThat(blankValidation.getDetail()).isEqualTo("Request validation failed");
+
+        ProblemDetail tooLarge = handler.handleMaxUploadSize(new MaxUploadSizeExceededException(1));
+        assertThat(tooLarge.getStatus()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE.value());
+        assertThat(tooLarge.getTitle()).isEqualTo("Upload too large");
 
         ProblemDetail io = handler.handleIo(new IOException("disk"));
         assertThat(io.getStatus()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR.value());

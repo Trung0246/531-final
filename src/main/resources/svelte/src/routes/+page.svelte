@@ -100,16 +100,17 @@
 	let message = $state<MessageState>({ text: '', type: 'info' });
 	let form = $state<RegisterDatasetInput>({
 		name: '',
-		description: '',
-		datasetType: 'EMAIL_ARCHIVE',
+	description: '',
 		hdfsPath: ''
 	});
 	let importForm = $state<ImportLocalDirectoryInput>({
 		datasetId: '',
+		datasetType: 'CSV_TEXT',
 		localDirectory: '',
 		targetSubdirectory: ''
 	});
 	let remoteTargetSubdirectory = $state('');
+	let remoteDatasetType = $state<'EMAIL_ARCHIVE' | 'CSV_TEXT' | 'GENERIC_FILES'>('CSV_TEXT');
 	let remoteFiles = $state<File[]>([]);
 	let deleteFilePath = $state('');
 
@@ -286,7 +287,6 @@
 			form = {
 				name: '',
 				description: '',
-				datasetType: form.datasetType,
 				hdfsPath: ''
 			};
 			setMessage(hdfsPathMessage(data.registerDataset, 'Registered dataset'), 'success');
@@ -314,10 +314,12 @@
 			});
 			importForm = {
 				datasetId: selectedDatasetId,
+				datasetType: importForm.datasetType,
 				localDirectory: '',
 				targetSubdirectory: importForm.targetSubdirectory
 			};
 			dashboard = null;
+			await loadDatasets();
 			setMessage(`Imported directory into ${selectedDataset?.name ?? 'dataset'}.`, 'success');
 		} catch (error) {
 			setMessage(toMessage(error), 'error');
@@ -351,11 +353,13 @@
 			if (remoteTargetSubdirectory.trim()) {
 				formData.append('targetSubdirectory', remoteTargetSubdirectory.trim());
 			}
+			formData.append('datasetType', remoteDatasetType);
 			files = await restRequest<HdfsFileDescriptor[]>(`/api/datasets/${selectedDatasetId}/import-remote`, {
 				method: 'POST',
 				body: formData
 			});
 			dashboard = null;
+			await loadDatasets();
 			setMessage(`Uploaded ${remoteFiles.length} file(s) into ${selectedDataset?.name ?? 'dataset'}.`, 'success');
 		} catch (error) {
 			setMessage(toMessage(error), 'error');
@@ -451,13 +455,6 @@
 				<span>Description</span>
 				<input bind:value={form.description} placeholder="Dataset stored in HDFS" />
 			</label>
-			<label>
-				<span>Dataset type</span>
-				<select bind:value={form.datasetType}>
-					<option value="EMAIL_ARCHIVE">EMAIL_ARCHIVE</option>
-					<option value="CSV_TEXT">CSV_TEXT</option>
-				</select>
-			</label>
 		</div>
 
 		{#if datasets.length > 0}
@@ -472,7 +469,7 @@
 					</select>
 				</label>
 				<label>
-					<span>Dataset type</span>
+					<span>Processing type</span>
 					<input value={selectedDataset?.datasetType ?? ''} readonly />
 				</label>
 				<label class="wide-field">
@@ -496,10 +493,18 @@
 			</div>
 
 			<div class="flow-note">
-				Files are managed under <strong>{selectedDataset.hdfsPath}</strong>. Uploading or importing the same file path replaces the existing file.
+				Files are managed under <strong>{selectedDataset.hdfsPath}</strong>. Choose the processing type here; uploading or importing the same file path replaces the existing file.
 			</div>
 
 			<div class="form-grid">
+				<label>
+					<span>Processing type</span>
+					<select bind:value={importForm.datasetType}>
+						<option value="CSV_TEXT">CSV_TEXT</option>
+						<option value="EMAIL_ARCHIVE">EMAIL_ARCHIVE</option>
+						<option value="GENERIC_FILES">GENERIC_FILES</option>
+					</select>
+				</label>
 				<label>
 					<span>Server directory</span>
 					<input bind:value={importForm.localDirectory} placeholder="/path/on/server/covid" />
@@ -516,6 +521,14 @@
 				<label>
 					<span>Client files</span>
 					<input type="file" multiple onchange={handleRemoteFileChange} />
+				</label>
+				<label>
+					<span>Upload processing type</span>
+					<select bind:value={remoteDatasetType}>
+						<option value="CSV_TEXT">CSV_TEXT</option>
+						<option value="EMAIL_ARCHIVE">EMAIL_ARCHIVE</option>
+						<option value="GENERIC_FILES">GENERIC_FILES</option>
+					</select>
 				</label>
 				<label>
 					<span>Upload subdirectory</span>

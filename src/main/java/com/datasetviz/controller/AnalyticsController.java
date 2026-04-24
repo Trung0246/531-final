@@ -3,7 +3,6 @@ package com.datasetviz.controller;
 import com.datasetviz.config.AnalyticsProperties;
 import com.datasetviz.model.AnalyticsOverview;
 import com.datasetviz.model.CommunicationEdge;
-import com.datasetviz.model.EmailAnalyticsSnapshot;
 import com.datasetviz.model.NamedCount;
 import com.datasetviz.model.TimeSeriesPoint;
 import com.datasetviz.service.DatasetAnalyticsService;

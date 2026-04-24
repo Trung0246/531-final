@@ -3,6 +3,7 @@ package com.datasetviz.service;
 import com.datasetviz.config.HdfsProperties;
 import com.datasetviz.dto.ImportLocalDirectoryRequest;
 import com.datasetviz.model.DatasetRegistration;
+import com.datasetviz.model.DatasetType;
 import com.datasetviz.model.HdfsFileDescriptor;
 import com.datasetviz.util.PathUtils;
 import org.springframework.stereotype.Service;
@@ -34,7 +35,7 @@ public class DatasetImportService {
     }
 
     public List<HdfsFileDescriptor> importLocalDirectory(ImportLocalDirectoryRequest request) throws IOException {
-        DatasetRegistration dataset = datasetRegistryService.getRequired(request.getDatasetId());
+        DatasetRegistration dataset = datasetRegistryService.updateDatasetType(request.getDatasetId(), request.getDatasetType());
         Path localDirectory = Paths.get(request.getLocalDirectory()).normalize();
         if (!Files.exists(localDirectory) || !Files.isDirectory(localDirectory)) {
             throw new IllegalArgumentException("Local directory does not exist: " + localDirectory);
@@ -60,8 +61,8 @@ public class DatasetImportService {
         return listDatasetFiles(dataset.getId(), 500);
     }
 
-    public List<HdfsFileDescriptor> importRemoteFiles(UUID datasetId, MultipartFile[] files, String targetSubdirectory) throws IOException {
-        DatasetRegistration dataset = datasetRegistryService.getRequired(datasetId);
+    public List<HdfsFileDescriptor> importRemoteFiles(UUID datasetId, DatasetType datasetType, MultipartFile[] files, String targetSubdirectory) throws IOException {
+        DatasetRegistration dataset = datasetRegistryService.updateDatasetType(datasetId, datasetType);
         if (files == null || files.length == 0) {
             throw new IllegalArgumentException("At least one file is required");
         }

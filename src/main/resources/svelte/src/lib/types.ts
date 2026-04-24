@@ -64,12 +64,12 @@ export interface DashboardView {
 export interface RegisterDatasetInput {
 	name: string;
 	description: string;
-	datasetType: DatasetType;
 	hdfsPath: string;
 }
 
 export interface ImportLocalDirectoryInput {
 	datasetId: string;
+	datasetType: DatasetType;
 	localDirectory: string;
 	targetSubdirectory: string;
 }

@@ -3,6 +3,7 @@ package com.datasetviz.controller;
 import com.datasetviz.dto.ImportLocalDirectoryRequest;
 import com.datasetviz.dto.RegisterDatasetRequest;
 import com.datasetviz.model.DatasetRegistration;
+import com.datasetviz.model.DatasetType;
 import com.datasetviz.model.HdfsFileDescriptor;
 import com.datasetviz.service.DatasetImportService;
 import com.datasetviz.service.DatasetRegistryService;
@@ -56,9 +57,10 @@ public class DatasetController {
 
     @PostMapping("/{datasetId}/import-remote")
     public ResponseEntity<List<HdfsFileDescriptor>> importRemote(@PathVariable UUID datasetId,
+                                                                 @RequestParam(defaultValue = "GENERIC_FILES") DatasetType datasetType,
                                                                  @RequestParam("files") MultipartFile[] files,
                                                                  @RequestParam(required = false) String targetSubdirectory) throws IOException {
-        return ResponseEntity.status(HttpStatus.CREATED).body(datasetImportService.importRemoteFiles(datasetId, files, targetSubdirectory));
+        return ResponseEntity.status(HttpStatus.CREATED).body(datasetImportService.importRemoteFiles(datasetId, datasetType, files, targetSubdirectory));
     }
 
     @DeleteMapping("/{datasetId}/files")

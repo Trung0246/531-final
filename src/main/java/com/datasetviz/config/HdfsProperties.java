@@ -70,7 +70,7 @@ public class HdfsProperties {
         private File baseDir;
         private int dataNodes = 1;
         private int nameNodePort;
-        private boolean format = true;
+        private boolean format;
 
         public boolean isEnabled() {
             return enabled;

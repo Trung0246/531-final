@@ -14,7 +14,7 @@ import java.net.URI;
 import java.nio.file.Files;
 
 @Configuration
-@EnableConfigurationProperties({HdfsProperties.class, AnalyticsProperties.class})
+@EnableConfigurationProperties({HdfsProperties.class, AnalyticsProperties.class, DatasetRegistryProperties.class})
 public class HdfsConfiguration {
 
     @Bean
@@ -40,9 +40,11 @@ public class HdfsConfiguration {
         }
         Files.createDirectories(baseDir.toPath());
 
+        File nameNodeDir = new File(baseDir, "namenode");
+        File dataNodeDir = new File(baseDir, "datanode");
         configuration.set(MiniDFSCluster.HDFS_MINIDFS_BASEDIR, baseDir.getAbsolutePath());
-        configuration.set("dfs.namenode.name.dir", new File(baseDir, "namenode").toURI().toString());
-        configuration.set("dfs.datanode.data.dir", new File(baseDir, "datanode").toURI().toString());
+        configuration.set("dfs.namenode.name.dir", nameNodeDir.toURI().toString());
+        configuration.set("dfs.datanode.data.dir", dataNodeDir.toURI().toString());
         configuration.set("dfs.namenode.rpc-bind-host", "0.0.0.0");
         configuration.set("dfs.namenode.http-bind-host", "0.0.0.0");
 
@@ -50,7 +52,7 @@ public class HdfsConfiguration {
                 .nameNodeHttpPort(0)
                 .numDataNodes(Math.max(1, properties.getEmbedded().getDataNodes()))
                 .checkExitOnShutdown(false)
-                .format(properties.getEmbedded().isFormat());
+                .format(properties.getEmbedded().isFormat() || !new File(nameNodeDir, "current").exists());
         if (properties.getEmbedded().getNameNodePort() > 0) {
             builder.nameNodePort(properties.getEmbedded().getNameNodePort());
         }

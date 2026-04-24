@@ -1,10 +1,16 @@
 spring:
   application:
     name: hdfs-dataset-visualization-service
+  servlet:
+    multipart:
+      max-file-size: ${SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE:5GB}
+      max-request-size: ${SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE:6GB}
 
 server:
   address: ${SERVER_ADDRESS:0.0.0.0}
   port: ${SERVER_PORT:8080}
+  tomcat:
+    max-swallow-size: ${SERVER_TOMCAT_MAX_SWALLOW_SIZE:6GB}
 
 management:
   endpoints:
@@ -13,6 +19,8 @@ management:
         include: health,info,metrics
 
 app:
+  registry:
+    path: ${APP_REGISTRY_PATH:dataset-registry.json}
   hdfs:
     uri: ${APP_HDFS_URI:hdfs://localhost:9000}
     user: ${APP_HDFS_USER:}
@@ -27,7 +35,8 @@ app:
       base-dir: ${APP_HDFS_EMBEDDED_BASE_DIR:.tmp/datasetviz-hdfs}
       data-nodes: ${APP_HDFS_EMBEDDED_DATA_NODES:1}
       name-node-port: ${APP_HDFS_EMBEDDED_NAME_NODE_PORT:0}
-      format: ${APP_HDFS_EMBEDDED_FORMAT:true}
+      # False preserves embedded HDFS across restarts; first startup still formats if storage is missing.
+      format: ${APP_HDFS_EMBEDDED_FORMAT:false}
     configuration:
       dfs.client.use.datanode.hostname: ${APP_HDFS_USE_DATANODE_HOSTNAME:true}
   analytics:

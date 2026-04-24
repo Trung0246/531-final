@@ -4,7 +4,6 @@ import com.datasetviz.config.AnalyticsProperties;
 import com.datasetviz.config.HdfsConfiguration;
 import com.datasetviz.config.HdfsProperties;
 import org.apache.hadoop.fs.FileSystem;
-import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.springframework.boot.SpringApplication;
@@ -13,7 +12,6 @@ import org.springframework.beans.factory.ObjectProvider;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
-import java.nio.file.Files;
 import java.time.Duration;
 import java.util.Map;
 
