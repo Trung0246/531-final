@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import ChartPanel from '$lib/components/ChartPanel.svelte';
 	import { graphqlRequest } from '$lib/graphql';
-	import type { DashboardView, DatasetView, RegisterDatasetInput } from '$lib/types';
+	import type { ChartMode, DashboardChart, DashboardView, DatasetView, RegisterDatasetInput } from '$lib/types';
 
 	const DATASETS_QUERY = `
 		query Datasets {
@@ -70,8 +70,12 @@
 		}
 	`;
 
+	const chartModes: ChartMode[] = ['BAR', 'LINE', 'TABLE'];
+
 	let datasets = $state<DatasetView[]>([]);
 	let dashboard = $state<DashboardView | null>(null);
+	let chartTypeOverrides = $state<Record<string, ChartMode>>({});
+	let chartFocusOverrides = $state<Record<string, string[]>>({});
 	let selectedDatasetId = $state('');
 	let maxFiles = $state(5000);
 	let refresh = $state(false);
@@ -94,6 +98,70 @@
 
 	function toMessage(error: unknown) {
 		return error instanceof Error ? error.message : 'Unexpected error';
+	}
+
+	function selectableValues(chart: DashboardChart): string[] {
+		if (chart.series.length > 1) {
+			return chart.series.map((series) => series.name);
+		}
+
+		if (chart.series.length === 1) {
+			return chart.series[0].points.map((point) => point.label);
+		}
+
+		return [];
+	}
+
+	function selectedValues(chart: DashboardChart): string[] {
+		return chartFocusOverrides[chart.id] ?? selectableValues(chart);
+	}
+
+	function setChartType(chartId: string, mode: string) {
+		chartTypeOverrides = {
+			...chartTypeOverrides,
+			[chartId]: mode as ChartMode
+		};
+	}
+
+	function toggleChartValue(chart: DashboardChart, value: string) {
+		const available = selectableValues(chart);
+		const current = selectedValues(chart);
+		const next = current.includes(value)
+			? current.filter((entry) => entry !== value)
+			: [...current, value];
+
+		chartFocusOverrides = {
+			...chartFocusOverrides,
+			[chart.id]: next.length === 0 ? available : next
+		};
+	}
+
+	function resolvedChart(chart: DashboardChart): DashboardChart {
+		const type = chartTypeOverrides[chart.id] ?? chart.type;
+		const focusedValues = selectedValues(chart);
+
+		if (chart.series.length > 1) {
+			return {
+				...chart,
+				type,
+				series: chart.series.filter((series) => focusedValues.includes(series.name))
+			};
+		}
+
+		if (chart.series.length === 1) {
+			return {
+				...chart,
+				type,
+				series: [
+					{
+						...chart.series[0],
+						points: chart.series[0].points.filter((point) => focusedValues.includes(point.label))
+					}
+				]
+			};
+		}
+
+		return { ...chart, type };
 	}
 
 	async function loadDatasets() {
@@ -128,6 +196,8 @@
 				refresh
 			});
 			dashboard = data.dashboard;
+			chartTypeOverrides = {};
+			chartFocusOverrides = {};
 			setMessage(`Loaded ${data.dashboard.datasetName}.`, 'success');
 		} catch (error) {
 			setMessage(toMessage(error), 'error');
@@ -303,8 +373,36 @@
 
 		<section class="chart-grid">
 			{#each dashboard.charts as chart}
+				{@const displayChart = resolvedChart(chart)}
 				<article class="panel chart-card">
-					<ChartPanel {chart} />
+					<div class="chart-tools">
+						<label>
+							<span>Visualization</span>
+							<select value={chartTypeOverrides[chart.id] ?? chart.type} onchange={(event) => setChartType(chart.id, (event.currentTarget as HTMLSelectElement).value)}>
+								{#each chartModes as mode}
+									<option value={mode}>{mode}</option>
+								{/each}
+							</select>
+						</label>
+
+						{#if selectableValues(chart).length > 0}
+							<div class="focus-picker">
+								<span>Focus</span>
+								<div class="focus-chips">
+									{#each selectableValues(chart) as value}
+										<button
+											type="button"
+											class:selected={selectedValues(chart).includes(value)}
+											onclick={() => toggleChartValue(chart, value)}
+										>
+											{value}
+										</button>
+									{/each}
+								</div>
+							</div>
+						{/if}
+					</div>
+					<ChartPanel chart={displayChart} />
 				</article>
 			{/each}
 		</section>
@@ -589,6 +687,51 @@
 	.list-panel,
 	.table-panel {
 		padding: 1.25rem;
+	}
+
+	.chart-tools {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+		align-items: start;
+		margin-bottom: 1rem;
+		flex-wrap: wrap;
+	}
+
+	.chart-tools label {
+		min-width: 180px;
+	}
+
+	.focus-picker {
+		display: grid;
+		gap: 0.45rem;
+		color: #aab7d8;
+	}
+
+	.focus-picker > span {
+		font-size: 0.88rem;
+	}
+
+	.focus-chips {
+		display: flex;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+
+	.focus-chips button {
+		padding: 0.45rem 0.75rem;
+		border-radius: 999px;
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		background: rgba(255, 255, 255, 0.04);
+		color: #b9c6e7;
+		font-size: 0.84rem;
+		font-weight: 500;
+	}
+
+	.focus-chips button.selected {
+		background: rgba(110, 168, 254, 0.2);
+		border-color: rgba(110, 168, 254, 0.55);
+		color: #eef2ff;
 	}
 
 	.bottom-grid {

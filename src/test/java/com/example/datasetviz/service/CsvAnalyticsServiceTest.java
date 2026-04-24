@@ -4,9 +4,13 @@ import com.example.datasetviz.config.AnalyticsProperties;
 import com.example.datasetviz.model.CsvAnalyticsSnapshot;
 import com.example.datasetviz.model.DatasetRegistration;
 import com.example.datasetviz.model.DatasetType;
+import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -173,5 +177,76 @@ class CsvAnalyticsServiceTest {
         assertThat(snapshot.getOverview().getFailedFiles()).isEqualTo(3);
         assertThat(snapshot.getOverview().getProcessedRows()).isZero();
         assertThat(snapshot.getMetricTotals()).isEmpty();
+    }
+
+    @Test
+    void analyzesXlsDataset() throws Exception {
+        DatasetRegistryService datasetRegistryService = mock(DatasetRegistryService.class);
+        HdfsStorageService hdfsStorageService = mock(HdfsStorageService.class);
+        AnalyticsProperties analyticsProperties = new AnalyticsProperties();
+        analyticsProperties.setCacheTtl(Duration.ofMinutes(5));
+        CsvAnalyticsService csvAnalyticsService = new CsvAnalyticsService(datasetRegistryService, hdfsStorageService, analyticsProperties);
+
+        UUID datasetId = UUID.randomUUID();
+        DatasetRegistration dataset = new DatasetRegistration(
+                datasetId,
+                "covid-xls",
+                "Legacy spreadsheet report",
+                DatasetType.CSV_TEXT,
+                "/datasets/covid-xls",
+                Instant.now()
+        );
+
+        when(datasetRegistryService.getRequired(datasetId)).thenReturn(dataset);
+        when(hdfsStorageService.exists("/datasets/covid-xls")).thenReturn(true);
+        when(hdfsStorageService.listFilePaths("/datasets/covid-xls", analyticsProperties.getDefaultMaxFiles()))
+                .thenReturn(List.of("/datasets/covid-xls/daily.xls"));
+        when(hdfsStorageService.open("/datasets/covid-xls/daily.xls"))
+                .thenReturn(new ByteArrayInputStream(buildXlsWorkbook()));
+
+        CsvAnalyticsSnapshot snapshot = csvAnalyticsService.analyze(datasetId, null, true);
+
+        assertThat(snapshot.getDatasetType()).isEqualTo(DatasetType.CSV_TEXT);
+        assertThat(snapshot.getOverview().getProcessedRows()).isEqualTo(4);
+        assertThat(snapshot.getOverview().getDistinctLocations()).isEqualTo(2);
+        assertThat(snapshot.getOverview().getDateColumn()).isEqualTo("ObservationDate");
+        assertThat(snapshot.getOverview().getLocationColumn()).isEqualTo("Country/Region");
+        assertThat(snapshot.getMetricTotals())
+                .extracting(item -> item.getName() + ":" + item.getCount())
+                .contains("Confirmed:3", "Deaths:0", "Recovered:0");
+        assertThat(snapshot.getRowsByDate())
+                .extracting(point -> point.getBucket() + ":" + point.getCount())
+                .containsExactly("2020-01-22:2", "2020-01-23:2");
+    }
+
+    private byte[] buildXlsWorkbook() throws IOException {
+        try (Workbook workbook = new HSSFWorkbook();
+             ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+            Sheet sheet = workbook.createSheet("daily");
+            sheet.createRow(0).createCell(0).setCellValue("ObservationDate");
+            sheet.getRow(0).createCell(1).setCellValue("Country/Region");
+            sheet.getRow(0).createCell(2).setCellValue("Confirmed");
+            sheet.getRow(0).createCell(3).setCellValue("Deaths");
+            sheet.getRow(0).createCell(4).setCellValue("Recovered");
+
+            Object[][] rows = new Object[][]{
+                    {"1/22/2020", "US", 1, 0, 0},
+                    {"1/22/2020", "Canada", 0, 0, 0},
+                    {"1/23/2020", "US", 2, 0, 0},
+                    {"1/23/2020", "Canada", 1, 0, 0}
+            };
+
+            for (int index = 0; index < rows.length; index++) {
+                var row = sheet.createRow(index + 1);
+                row.createCell(0).setCellValue((String) rows[index][0]);
+                row.createCell(1).setCellValue((String) rows[index][1]);
+                row.createCell(2).setCellValue(((Number) rows[index][2]).doubleValue());
+                row.createCell(3).setCellValue(((Number) rows[index][3]).doubleValue());
+                row.createCell(4).setCellValue(((Number) rows[index][4]).doubleValue());
+            }
+
+            workbook.write(outputStream);
+            return outputStream.toByteArray();
+        }
     }
 }

@@ -12,8 +12,15 @@ import com.example.datasetviz.model.TimeSeriesPoint;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.springframework.stereotype.Service;
 
+import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -105,7 +112,7 @@ public class CsvAnalyticsService {
         for (String filePath : filePaths) {
             mutableAnalytics.incrementScannedFiles();
             try (InputStream inputStream = hdfsStorageService.open(filePath)) {
-                analyzeFile(inputStream, mutableAnalytics);
+                analyzeFile(inputStream, filePath, mutableAnalytics);
             } catch (Exception exception) {
                 mutableAnalytics.incrementFailedFiles();
             }
@@ -116,7 +123,12 @@ public class CsvAnalyticsService {
         return snapshot;
     }
 
-    private void analyzeFile(InputStream inputStream, MutableAnalytics mutableAnalytics) throws IOException {
+    private void analyzeFile(InputStream inputStream, String filePath, MutableAnalytics mutableAnalytics) throws IOException {
+        if (isSpreadsheetFile(filePath)) {
+            analyzeSpreadsheetFile(inputStream, mutableAnalytics);
+            return;
+        }
+
         try (Reader reader = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
              CSVParser parser = CSVFormat.DEFAULT.builder()
                      .setHeader()
@@ -129,7 +141,9 @@ public class CsvAnalyticsService {
             if (headers == null || headers.isEmpty()) {
                 throw new IllegalArgumentException("CSV file is missing headers");
             }
-            List<CSVRecord> records = parser.getRecords();
+            List<TabularRecord> records = parser.getRecords().stream()
+                    .map(record -> new TabularRecord(record.toMap()))
+                    .toList();
             FileSchema schema = detectSchema(headers, records);
             if (schema.metricColumns().isEmpty()) {
                 throw new IllegalArgumentException("CSV file does not contain detectable numeric metric columns");
@@ -138,7 +152,54 @@ public class CsvAnalyticsService {
         }
     }
 
-    private FileSchema detectSchema(List<String> headers, List<CSVRecord> records) {
+    private void analyzeSpreadsheetFile(InputStream inputStream, MutableAnalytics mutableAnalytics) throws IOException {
+        try (BufferedInputStream bufferedInputStream = new BufferedInputStream(inputStream);
+             Workbook workbook = WorkbookFactory.create(bufferedInputStream)) {
+            Sheet sheet = workbook.getNumberOfSheets() > 0 ? workbook.getSheetAt(0) : null;
+            if (sheet == null) {
+                throw new IllegalArgumentException("Spreadsheet file does not contain any sheets");
+            }
+
+            Row headerRow = sheet.getPhysicalNumberOfRows() > 0 ? sheet.getRow(sheet.getFirstRowNum()) : null;
+            if (headerRow == null) {
+                throw new IllegalArgumentException("Spreadsheet file is missing headers");
+            }
+
+            DataFormatter formatter = new DataFormatter();
+            List<String> headers = new ArrayList<>();
+            int lastCell = Math.max(headerRow.getLastCellNum(), (short) 0);
+            for (int cellIndex = 0; cellIndex < lastCell; cellIndex++) {
+                String header = formatter.formatCellValue(headerRow.getCell(cellIndex)).trim();
+                headers.add(header.isBlank() ? "Column" + (cellIndex + 1) : header);
+            }
+            if (headers.isEmpty()) {
+                throw new IllegalArgumentException("Spreadsheet file is missing headers");
+            }
+
+            List<TabularRecord> records = new ArrayList<>();
+            for (int rowIndex = sheet.getFirstRowNum() + 1; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
+                Row row = sheet.getRow(rowIndex);
+                if (row == null || isBlankRow(row, headers.size(), formatter)) {
+                    continue;
+                }
+
+                Map<String, String> values = new LinkedHashMap<>();
+                for (int cellIndex = 0; cellIndex < headers.size(); cellIndex++) {
+                    Cell cell = row.getCell(cellIndex);
+                    values.put(headers.get(cellIndex), formatter.formatCellValue(cell).trim());
+                }
+                records.add(new TabularRecord(values));
+            }
+
+            FileSchema schema = detectSchema(headers, records);
+            if (schema.metricColumns().isEmpty()) {
+                throw new IllegalArgumentException("Spreadsheet file does not contain detectable numeric metric columns");
+            }
+            mutableAnalytics.acceptFile(schema, records);
+        }
+    }
+
+    private FileSchema detectSchema(List<String> headers, List<TabularRecord> records) {
         Map<String, String> normalizedToOriginal = new LinkedHashMap<>();
         for (String header : headers) {
             normalizedToOriginal.putIfAbsent(normalizeHeader(header), header);
@@ -169,9 +230,9 @@ public class CsvAnalyticsService {
         return new FileSchema(dateColumn, locationColumn, metricColumns);
     }
 
-    private boolean isNumericColumn(String header, List<CSVRecord> records) {
+    private boolean isNumericColumn(String header, List<TabularRecord> records) {
         int inspected = 0;
-        for (CSVRecord record : records) {
+        for (TabularRecord record : records) {
             if (!record.isMapped(header)) {
                 return false;
             }
@@ -205,6 +266,20 @@ public class CsvAnalyticsService {
             return analyticsProperties.getDefaultMaxFiles();
         }
         return Math.min(requestedMaxFiles, analyticsProperties.getMaxFilesHardLimit());
+    }
+
+    private boolean isSpreadsheetFile(String filePath) {
+        String normalized = filePath == null ? "" : filePath.toLowerCase(Locale.ROOT);
+        return normalized.endsWith(".xls") || normalized.endsWith(".xlsx");
+    }
+
+    private boolean isBlankRow(Row row, int headerCount, DataFormatter formatter) {
+        for (int cellIndex = 0; cellIndex < headerCount; cellIndex++) {
+            if (!formatter.formatCellValue(row.getCell(cellIndex)).trim().isBlank()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private String normalizeHeader(String header) {
@@ -284,7 +359,7 @@ public class CsvAnalyticsService {
             failedFiles++;
         }
 
-        void acceptFile(FileSchema schema, List<CSVRecord> records) {
+        void acceptFile(FileSchema schema, List<TabularRecord> records) {
             if (dateColumn == null && schema.dateColumn() != null) {
                 dateColumn = schema.dateColumn();
             }
@@ -293,7 +368,7 @@ public class CsvAnalyticsService {
             }
             metricColumns.addAll(schema.metricColumns());
 
-            for (CSVRecord record : records) {
+            for (TabularRecord record : records) {
                 processedRows++;
 
                 LocalDate observationDate = schema.dateColumn() == null || !record.isMapped(schema.dateColumn())
@@ -446,7 +521,7 @@ public class CsvAnalyticsService {
         return parseNumericValue(rawValue);
     }
 
-    private static String resolveLocation(CSVRecord record, String locationColumn) {
+    private static String resolveLocation(TabularRecord record, String locationColumn) {
         if (locationColumn == null || !record.isMapped(locationColumn)) {
             return null;
         }
@@ -459,6 +534,16 @@ public class CsvAnalyticsService {
     }
 
     private record FileSchema(String dateColumn, String locationColumn, List<String> metricColumns) {
+    }
+
+    private record TabularRecord(Map<String, String> values) {
+        String get(String column) {
+            return values.get(column);
+        }
+
+        boolean isMapped(String column) {
+            return values.containsKey(column);
+        }
     }
 
     private record CachedSnapshot(Instant cachedAt, CsvAnalyticsSnapshot snapshot) {

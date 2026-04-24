@@ -66,6 +66,16 @@
 		const safeSeries = Math.max(seriesCount, 1);
 		return Math.max(10, (chartWidth() / safeLabels) * 0.72 / safeSeries);
 	}
+
+	function tableRows() {
+		const allLabels = labels();
+		if (chart.series.length <= 1) {
+			const firstSeries = chart.series[0];
+			return firstSeries ? firstSeries.points.map((point: DashboardPoint) => [point.label, String(point.value)]) : [];
+		}
+
+		return allLabels.map((label) => [label, ...chart.series.map((series: DashboardSeries) => String(valueAt(series, label)))]);
+	}
 </script>
 
 <div class="chart-panel">
@@ -82,6 +92,33 @@
 
 	{#if chart.series.length === 0 || labels().length === 0}
 		<div class="empty-chart">No chart data available.</div>
+	{:else if chart.type === 'TABLE'}
+		<div class="table-wrapper">
+			<table>
+				<thead>
+					<tr>
+						{#if chart.series.length <= 1}
+							<th>Label</th>
+							<th>{chart.series[0]?.name ?? 'Value'}</th>
+						{:else}
+							<th>Label</th>
+							{#each chart.series as series}
+								<th>{series.name}</th>
+							{/each}
+						{/if}
+					</tr>
+				</thead>
+				<tbody>
+					{#each tableRows() as row}
+						<tr>
+							{#each row as cell}
+								<td>{cell}</td>
+							{/each}
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
 	{:else}
 		<svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={chart.title}>
 			{#each yTicks() as tick}
@@ -202,6 +239,33 @@
 		border-radius: 1rem;
 		border: 1px dashed rgba(255, 255, 255, 0.14);
 		color: #8b94b4;
+	}
+
+	.table-wrapper {
+		overflow-x: auto;
+	}
+
+	table {
+		width: 100%;
+		border-collapse: collapse;
+	}
+
+	th,
+	td {
+		padding: 0.75rem;
+		border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+		text-align: left;
+	}
+
+	th {
+		font-size: 0.76rem;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: #8b94b4;
+	}
+
+	td {
+		color: #dfe7ff;
 	}
 
 	@media (max-width: 720px) {

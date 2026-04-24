@@ -15,9 +15,6 @@
 !/src/main/resources/graphql/
 !/src/main/resources/graphql/**
 
-!/src/main/resources/static/
-!/src/main/resources/static/**
-
 !/src/main/resources/svelte/
 !/src/main/resources/svelte/.gitignore
 !/src/main/resources/svelte/.npmrc

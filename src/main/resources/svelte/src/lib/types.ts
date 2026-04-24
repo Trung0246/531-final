@@ -1,4 +1,5 @@
 export type DatasetType = 'EMAIL_ARCHIVE' | 'CSV_TEXT' | 'GENERIC_FILES';
+export type ChartMode = 'BAR' | 'LINE' | 'TABLE';
 
 export interface DatasetView {
 	id: string;
@@ -27,7 +28,7 @@ export interface DashboardSeries {
 export interface DashboardChart {
 	id: string;
 	title: string;
-	type: string;
+	type: ChartMode;
 	series: DashboardSeries[];
 }
 
