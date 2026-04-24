@@ -11,7 +11,7 @@
         <relativePath/>
     </parent>
 
-    <groupId>com.example</groupId>
+    <groupId>com.datasetviz</groupId>
     <artifactId>hdfs-dataset-visualization-service</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>hdfs-dataset-visualization-service</name>

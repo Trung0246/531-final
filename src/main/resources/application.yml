@@ -24,7 +24,7 @@ app:
     local-path: ${APP_HDFS_LOCAL_PATH:}
     embedded:
       enabled: ${APP_HDFS_EMBEDDED_ENABLED:false}
-      base-dir: ${APP_HDFS_EMBEDDED_BASE_DIR:}
+      base-dir: ${APP_HDFS_EMBEDDED_BASE_DIR:.tmp/datasetviz-hdfs}
       data-nodes: ${APP_HDFS_EMBEDDED_DATA_NODES:1}
       name-node-port: ${APP_HDFS_EMBEDDED_NAME_NODE_PORT:0}
       format: ${APP_HDFS_EMBEDDED_FORMAT:true}

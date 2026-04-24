@@ -34,7 +34,7 @@ This project is intentionally **visualization-first**:
 ## Project structure
 
 ```text
-src/main/java/com/example/datasetviz
+src/main/java/com/datasetviz
 ├── config
 ├── controller
 ├── dto
@@ -164,7 +164,7 @@ app:
   hdfs:
     embedded:
       enabled: true
-      base-dir: /tmp/datasetviz-hdfs
+      base-dir: .tmp/datasetviz-hdfs
       data-nodes: 1
       name-node-port: 52000
 ```
@@ -263,6 +263,12 @@ mkdir -p .m2/repository .tmp/jansi
 JAVA_HOME="$(mise where java@17.0.2)" \
 MAVEN_OPTS="-Djansi.tmpdir=$PWD/.tmp/jansi" \
 mvn -Dmaven.repo.local="$PWD/.m2/repository" clean package
+```
+
+```bash
+env JAVA_HOME="$(mise where java@17.0.2)" \
+     MAVEN_OPTS="-Djansi.tmpdir=$PWD/.tmp/jansi" \
+     mvn -Dmaven.repo.local="$PWD/.m2/repository" clean package
 ```
 
 The packaged server jar is written to:
