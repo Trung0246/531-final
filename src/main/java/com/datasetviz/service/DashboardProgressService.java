@@ -28,7 +28,7 @@ public class DashboardProgressService {
 
     public void subscribe(String datasetId, WebSocketSession session) {
         sessionsByDataset.computeIfAbsent(datasetId, ignored -> ConcurrentHashMap.newKeySet()).add(session);
-        publishToSession(session, new DashboardProgressEvent(datasetId, "connected", "Live dashboard progress connected.", 0, 0, 0, 0, List.of(), null, false));
+        publishToSession(session, new DashboardProgressEvent(datasetId, "connected", "Live dashboard progress connected.", 0, 0, 0, 0, List.of(), List.of(), null, false));
     }
 
     public void unsubscribe(WebSocketSession session) {

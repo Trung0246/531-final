@@ -133,6 +133,7 @@ public class EmailAnalyticsService {
                 processedRows,
                 failedFiles,
                 List.of(),
+                List.of(),
                 null,
                 complete
         ));

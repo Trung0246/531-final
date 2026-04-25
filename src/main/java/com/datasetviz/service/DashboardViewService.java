@@ -32,6 +32,16 @@ public class DashboardViewService {
         throw new IllegalArgumentException("Dashboard view supports EMAIL_ARCHIVE and CSV_TEXT analytics snapshots only.");
     }
 
+    public List<DashboardView.Chart> toDashboardCharts(Object snapshot) {
+        if (snapshot instanceof EmailAnalyticsSnapshot emailSnapshot) {
+            return emailCharts(emailSnapshot);
+        }
+        if (snapshot instanceof CsvAnalyticsSnapshot csvSnapshot) {
+            return csvCharts(csvSnapshot);
+        }
+        throw new IllegalArgumentException("Dashboard charts support EMAIL_ARCHIVE and CSV_TEXT analytics snapshots only.");
+    }
+
     public DatasetView toDatasetView(DatasetRegistration registration) {
         return toDatasetView(registration, null);
     }
@@ -61,12 +71,7 @@ public class DashboardViewService {
                 summaryItem("Last email", formatInstant(snapshot.getOverview().getLastEmailAt()))
         );
 
-        List<DashboardView.Chart> charts = List.of(
-                chart("volume-by-month", "Email volume by month", "BAR", List.of(seriesFromBuckets("Count", snapshot.getVolumeByMonth()))),
-                chart("top-senders", "Top senders", "BAR", List.of(seriesFromPoints("Count", toPoints(snapshot.getTopSenders())))),
-                chart("top-recipients", "Top recipients", "BAR", List.of(seriesFromPoints("Count", toPoints(snapshot.getTopRecipients())))),
-                chart("hourly-distribution", "Hourly distribution (UTC)", "LINE", List.of(seriesFromBuckets("Count", snapshot.getHourlyDistribution())))
-        );
+        List<DashboardView.Chart> charts = emailCharts(snapshot);
 
         return new DashboardView(
                 snapshot.getDatasetId().toString(),
@@ -89,11 +94,18 @@ public class DashboardViewService {
         );
     }
 
+    private List<DashboardView.Chart> emailCharts(EmailAnalyticsSnapshot snapshot) {
+        return List.of(
+                chart("volume-by-month", "Email volume by month", "BAR", List.of(seriesFromBuckets("Count", snapshot.getVolumeByMonth()))),
+                chart("top-senders", "Top senders", "BAR", List.of(seriesFromPoints("Count", toPoints(snapshot.getTopSenders())))),
+                chart("top-recipients", "Top recipients", "BAR", List.of(seriesFromPoints("Count", toPoints(snapshot.getTopRecipients())))),
+                chart("hourly-distribution", "Hourly distribution (UTC)", "LINE", List.of(seriesFromBuckets("Count", snapshot.getHourlyDistribution())))
+        );
+    }
+
     private DashboardView fromCsvSnapshot(CsvAnalyticsSnapshot snapshot) {
         CsvAnalyticsOverview overview = snapshot.getOverview();
         List<MetricBreakdown> topLocationBreakdowns = snapshot.getTopLocationsByMetric() == null ? List.of() : snapshot.getTopLocationsByMetric();
-        List<NamedCount> primaryBreakdown = topLocationBreakdowns.isEmpty() ? List.of() : topLocationBreakdowns.get(0).getItems();
-        List<MetricSeries> metricSeries = snapshot.getMetricTimeSeries() == null ? List.of() : snapshot.getMetricTimeSeries().stream().limit(3).toList();
 
         List<DashboardView.SummaryItem> summaryItems = List.of(
                 summaryItem("Dataset", snapshot.getDatasetName()),
@@ -109,17 +121,7 @@ public class DashboardViewService {
                 summaryItem("Last observation", formatInstant(overview.getLastObservedAt()))
         );
 
-        List<DashboardView.Chart> charts = List.of(
-                chart("rows-by-date", "Rows by observation date", "LINE", List.of(seriesFromBuckets("Rows", snapshot.getRowsByDate()))),
-                chart("metric-totals", "Latest metric totals", "BAR", List.of(seriesFromPoints("Count", toPoints(snapshot.getMetricTotals())))),
-                chart(
-                        "top-locations",
-                        topLocationBreakdowns.isEmpty() ? "Top locations" : "Top locations by " + topLocationBreakdowns.get(0).getName(),
-                        "BAR",
-                        List.of(seriesFromPoints("Count", toPoints(primaryBreakdown)))
-                ),
-                chart("metric-trends", "Metric trends over time", "LINE", metricSeries.stream().map(this::series).toList())
-        );
+        List<DashboardView.Chart> charts = csvCharts(snapshot);
 
         return new DashboardView(
                 snapshot.getDatasetId().toString(),
@@ -136,6 +138,24 @@ public class DashboardViewService {
                         buildCsvListItems(overview, snapshot.getMetricTotals())
                 ),
                 buildCsvTable(topLocationBreakdowns)
+        );
+    }
+
+    private List<DashboardView.Chart> csvCharts(CsvAnalyticsSnapshot snapshot) {
+        List<MetricBreakdown> topLocationBreakdowns = snapshot.getTopLocationsByMetric() == null ? List.of() : snapshot.getTopLocationsByMetric();
+        List<NamedCount> primaryBreakdown = topLocationBreakdowns.isEmpty() ? List.of() : topLocationBreakdowns.get(0).getItems();
+        List<MetricSeries> metricSeries = snapshot.getMetricTimeSeries() == null ? List.of() : snapshot.getMetricTimeSeries().stream().limit(3).toList();
+
+        return List.of(
+                chart("rows-by-date", "Rows by observation date", "LINE", List.of(seriesFromBuckets("Rows", snapshot.getRowsByDate()))),
+                chart("metric-totals", "Latest metric totals", "BAR", List.of(seriesFromPoints("Count", toPoints(snapshot.getMetricTotals())))),
+                chart(
+                        "top-locations",
+                        topLocationBreakdowns.isEmpty() ? "Top locations" : "Top locations by " + topLocationBreakdowns.get(0).getName(),
+                        "BAR",
+                        List.of(seriesFromPoints("Count", toPoints(primaryBreakdown)))
+                ),
+                chart("metric-trends", "Metric trends over time", "LINE", metricSeries.stream().map(this::series).toList())
         );
     }
 

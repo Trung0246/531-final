@@ -87,11 +87,13 @@
 	`;
 
 	const chartModes: ChartMode[] = ['BAR', 'LINE', 'TABLE'];
+	const focusValueLimit = 40;
 	type MessageState = { text: string; type: 'info' | 'success' | 'error' };
 
 	let datasets = $state<DatasetView[]>([]);
 	let files = $state<HdfsFileDescriptor[]>([]);
 	let dashboard = $state<DashboardView | null>(null);
+	let liveCharts = $state<DashboardChart[] | null>(null);
 	let chartTypeOverrides = $state<Record<string, ChartMode>>({});
 	let chartFocusOverrides = $state<Record<string, string[]>>({});
 	let selectedDatasetId = $state('');
@@ -153,8 +155,12 @@
 			if (event.data.type === 'progress' && event.data.progress) {
 				const progress = event.data.progress;
 				dashboardProgress = progress;
+				if (progress.charts?.length) {
+					liveCharts = progress.charts;
+				}
 				if (progress.dashboard) {
 					dashboard = progress.dashboard;
+					liveCharts = progress.dashboard.charts;
 				}
 				if (!progress.complete) {
 					setMessage(progress.message, 'info');
@@ -195,7 +201,9 @@
 		}
 
 		if (chart.series.length === 1) {
-			return chart.series[0].points.map((point) => point.label);
+			return chart.series[0].points.length <= focusValueLimit
+				? chart.series[0].points.map((point) => point.label)
+				: [];
 		}
 
 		return [];
@@ -203,6 +211,10 @@
 
 	function selectedValues(chart: DashboardChart): string[] {
 		return chartFocusOverrides[chart.id] ?? selectableValues(chart);
+	}
+
+	function visibleCharts(): DashboardChart[] {
+		return liveCharts ?? dashboard?.charts ?? [];
 	}
 
 	function setChartType(chartId: string, mode: string) {
@@ -221,6 +233,9 @@
 
 	function toggleChartValue(chart: DashboardChart, value: string) {
 		const available = selectableValues(chart);
+		if (available.length === 0) {
+			return;
+		}
 		const current = selectedValues(chart);
 		const next = current.includes(value)
 			? current.filter((entry) => entry !== value)
@@ -234,24 +249,29 @@
 
 	function resolvedChart(chart: DashboardChart): DashboardChart {
 		const type = chartTypeOverrides[chart.id] ?? chart.type;
-		const focusedValues = selectedValues(chart);
 
 		if (chart.series.length > 1) {
+			const focusedValues = new Set(selectedValues(chart));
 			return {
 				...chart,
 				type,
-				series: chart.series.filter((series) => focusedValues.includes(series.name))
+				series: chart.series.filter((series) => focusedValues.has(series.name))
 			};
 		}
 
 		if (chart.series.length === 1) {
+			const focusedValues = chartFocusOverrides[chart.id];
+			if (!focusedValues || chart.series[0].points.length > focusValueLimit) {
+				return { ...chart, type };
+			}
+			const focusedValueSet = new Set(focusedValues);
 			return {
 				...chart,
 				type,
 				series: [
 					{
 						...chart.series[0],
-						points: chart.series[0].points.filter((point) => focusedValues.includes(point.label))
+						points: chart.series[0].points.filter((point) => focusedValueSet.has(point.label))
 					}
 				]
 			};
@@ -271,6 +291,7 @@
 			if (datasets.length === 0) {
 				selectedDatasetId = '';
 				dashboard = null;
+				liveCharts = null;
 				files = [];
 			}
 			if (selectedDatasetId) {
@@ -296,6 +317,7 @@
 
 	async function handleDatasetSelectionChange() {
 		dashboard = null;
+		liveCharts = null;
 		dashboardProgress = null;
 		closeProgressSocket();
 		deleteFilePath = '';
@@ -318,6 +340,7 @@
 
 		isLoadingDashboard = true;
 		dashboardProgress = null;
+		liveCharts = null;
 		openProgressSocket(selectedDatasetId);
 		setMessage('Loading dashboard...', 'info');
 		try {
@@ -328,6 +351,7 @@
 				refresh
 			});
 			dashboard = data.dashboard;
+			liveCharts = data.dashboard.charts;
 			chartTypeOverrides = {};
 			chartFocusOverrides = {};
 			setMessage(`Loaded ${data.dashboard.datasetName}.`, 'success');
@@ -383,6 +407,7 @@
 				targetSubdirectory: importForm.targetSubdirectory
 			};
 			dashboard = null;
+			liveCharts = null;
 			await loadDatasets();
 			setMessage(`Imported directory into ${selectedDataset?.name ?? 'dataset'}.`, 'success');
 		} catch (error) {
@@ -423,6 +448,7 @@
 				body: formData
 			});
 			dashboard = null;
+			liveCharts = null;
 			await loadDatasets();
 			setMessage(`Uploaded ${remoteFiles.length} file(s) into ${selectedDataset?.name ?? 'dataset'}.`, 'success');
 		} catch (error) {
@@ -446,6 +472,7 @@
 			});
 			deleteFilePath = '';
 			dashboard = null;
+			liveCharts = null;
 			await loadFiles();
 			setMessage('Deleted file from dataset.', 'success');
 		} catch (error) {
@@ -662,7 +689,7 @@
 			</div>
 
 			<div class="flow-note dashboard-note">
-				Max files limits how many files are scanned. Update every rows controls lightweight row/file progress; charts refresh every 5,000 rows or at file boundaries to keep the UI responsive.
+				Max files limits how many files are scanned. Update every rows controls lightweight row/file progress and live chart data; full dashboard panels refresh less often to keep the UI responsive.
 			</div>
 			{#if !selectedDatasetSupportsDashboard}
 				<div class="flow-note dashboard-note warning-note">
@@ -748,7 +775,8 @@
 		{/if}
 
 		<section class="chart-grid">
-			{#each dashboard.charts as chart}
+			{#each visibleCharts() as chart (chart.id)}
+				{@const focusValues = selectableValues(chart)}
 				{@const displayChart = resolvedChart(chart)}
 				<article class="panel chart-card">
 					<div class="chart-tools">
@@ -761,11 +789,11 @@
 							</select>
 						</label>
 
-						{#if selectableValues(chart).length > 0}
+						{#if focusValues.length > 0}
 							<div class="focus-picker">
 								<span>Focus</span>
 								<div class="focus-chips">
-									{#each selectableValues(chart) as value}
+									{#each focusValues as value}
 										<button
 											type="button"
 											class:selected={selectedValues(chart).includes(value)}

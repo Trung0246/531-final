@@ -11,6 +11,7 @@ public record DashboardProgressEvent(
         int processedRows,
         int failedFiles,
         List<FileProgress> files,
+        List<DashboardView.Chart> charts,
         DashboardView dashboard,
         boolean complete
 ) {

@@ -77,6 +77,7 @@ export interface DashboardProgressEvent {
 	processedRows: number;
 	failedFiles: number;
 	files: DashboardFileProgress[];
+	charts: DashboardChart[];
 	dashboard: DashboardView | null;
 	complete: boolean;
 }

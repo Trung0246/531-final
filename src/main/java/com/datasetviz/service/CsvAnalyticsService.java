@@ -138,11 +138,11 @@ public class CsvAnalyticsService {
         CachedSnapshot cachedSnapshot = cache.get(cacheKey);
         if (!refresh && cachedSnapshot != null && !cachedSnapshot.isExpired(analyticsProperties.getCacheTtl().toMillis())) {
             CsvAnalyticsSnapshot snapshot = cachedSnapshot.snapshot();
-            publish(datasetId, "cache", "Loaded dashboard analytics from cache.", snapshot.getOverview().getScannedFiles(), snapshot.getOverview().getScannedFiles(), snapshot.getOverview().getProcessedRows(), snapshot.getOverview().getFailedFiles(), List.of(), dashboardViewService.toDashboardView(snapshot), true);
+            publish(datasetId, "cache", "Loaded dashboard analytics from cache.", snapshot.getOverview().getScannedFiles(), snapshot.getOverview().getScannedFiles(), snapshot.getOverview().getProcessedRows(), snapshot.getOverview().getFailedFiles(), List.of(), dashboardViewService.toDashboardCharts(snapshot), dashboardViewService.toDashboardView(snapshot), true);
             return cachedSnapshot.snapshot();
         }
 
-        publish(datasetId, "starting", "Preparing CSV/text analytics.", 0, 0, 0, 0, List.of(), null, false);
+        publish(datasetId, "starting", "Preparing CSV/text analytics.", 0, 0, 0, 0, List.of(), List.of(), null, false);
         if (!hdfsStorageService.exists(dataset.getHdfsPath())) {
             throw new IllegalArgumentException("HDFS path does not exist: " + dataset.getHdfsPath());
         }
@@ -150,27 +150,27 @@ public class CsvAnalyticsService {
         MutableAnalytics mutableAnalytics = new MutableAnalytics();
         List<String> filePaths = hdfsStorageService.listFilePaths(dataset.getHdfsPath(), maxFiles);
         List<MutableFileProgress> fileProgress = buildFileProgress(filePaths);
-        publish(datasetId, "listed", "Found " + filePaths.size() + " file(s) to scan.", 0, filePaths.size(), 0, 0, toFileProgress(fileProgress), null, false);
+        publish(datasetId, "listed", "Found " + filePaths.size() + " file(s) to scan.", 0, filePaths.size(), 0, 0, toFileProgress(fileProgress), List.of(), null, false);
         for (int fileIndex = 0; fileIndex < filePaths.size(); fileIndex++) {
             String filePath = filePaths.get(fileIndex);
             MutableFileProgress currentFile = fileProgress.get(fileIndex);
             mutableAnalytics.incrementScannedFiles();
             currentFile.start("Scanning file.");
-            publishProgress(datasetId, dataset, "processing", "Scanning " + fileName(filePath), mutableAnalytics, filePaths.size(), fileProgress, false, false);
+            publishProgress(datasetId, dataset, "processing", "Scanning " + fileName(filePath), mutableAnalytics, filePaths.size(), fileProgress, false, false, false);
             try (InputStream inputStream = hdfsStorageService.open(filePath)) {
                 analyzeFile(datasetId, dataset, inputStream, filePath, mutableAnalytics, filePaths.size(), currentFile, fileProgress, updateEveryRows);
                 currentFile.complete("Finished file.");
-                publishProgress(datasetId, dataset, "processing", "Finished " + fileName(filePath), mutableAnalytics, filePaths.size(), fileProgress, false, true);
+                publishProgress(datasetId, dataset, "processing", "Finished " + fileName(filePath), mutableAnalytics, filePaths.size(), fileProgress, false, true, true);
             } catch (Exception exception) {
                 mutableAnalytics.incrementFailedFiles();
                 currentFile.fail(exception.getMessage());
-                publishProgress(datasetId, dataset, "warning", "Skipped " + fileName(filePath) + ": " + exception.getMessage(), mutableAnalytics, filePaths.size(), fileProgress, false, true);
+                publishProgress(datasetId, dataset, "warning", "Skipped " + fileName(filePath) + ": " + exception.getMessage(), mutableAnalytics, filePaths.size(), fileProgress, false, true, true);
             }
         }
 
         CsvAnalyticsSnapshot snapshot = mutableAnalytics.toSnapshot(dataset, maxFiles, Instant.now(), analyticsProperties);
         cache.put(cacheKey, new CachedSnapshot(Instant.now(), snapshot));
-        publish(datasetId, "complete", "Dashboard analytics ready.", snapshot.getOverview().getScannedFiles(), filePaths.size(), snapshot.getOverview().getProcessedRows(), snapshot.getOverview().getFailedFiles(), toFileProgress(fileProgress), dashboardViewService.toDashboardView(snapshot), true);
+        publish(datasetId, "complete", "Dashboard analytics ready.", snapshot.getOverview().getScannedFiles(), filePaths.size(), snapshot.getOverview().getProcessedRows(), snapshot.getOverview().getFailedFiles(), toFileProgress(fileProgress), dashboardViewService.toDashboardCharts(snapshot), dashboardViewService.toDashboardView(snapshot), true);
         return snapshot;
     }
 
@@ -187,7 +187,7 @@ public class CsvAnalyticsService {
             int beforeRows = mutableAnalytics.getProcessedRows();
             analyzeSpreadsheetFile(inputStream, mutableAnalytics);
             currentFile.processedRows += mutableAnalytics.getProcessedRows() - beforeRows;
-            publishProgress(datasetId, dataset, "processing", "Processed " + currentFile.processedRows + " rows from " + fileName(filePath), mutableAnalytics, totalFiles, fileProgress, false, true);
+            publishProgress(datasetId, dataset, "processing", "Processed " + currentFile.processedRows + " rows from " + fileName(filePath), mutableAnalytics, totalFiles, fileProgress, false, true, true);
             return;
         }
 
@@ -219,14 +219,14 @@ public class CsvAnalyticsService {
                 mutableAnalytics.acceptRecord(schema, record);
                 currentFile.processedRows++;
             }
-            publishProgress(datasetId, dataset, "processing", "Processed " + currentFile.processedRows + " rows from " + fileName(filePath), mutableAnalytics, totalFiles, fileProgress, false, true);
+            publishProgress(datasetId, dataset, "processing", "Processed " + currentFile.processedRows + " rows from " + fileName(filePath), mutableAnalytics, totalFiles, fileProgress, false, true, true);
 
             while (iterator.hasNext()) {
                 mutableAnalytics.acceptRecord(schema, new TabularRecord(iterator.next()));
                 currentFile.processedRows++;
                 if (mutableAnalytics.getProcessedRows() % updateEveryRows == 0) {
                     boolean includeDashboard = mutableAnalytics.getProcessedRows() % DASHBOARD_PROGRESS_INTERVAL == 0;
-                    publishProgress(datasetId, dataset, "processing", "Processed " + currentFile.processedRows + " rows from " + fileName(filePath), mutableAnalytics, totalFiles, fileProgress, false, includeDashboard);
+                    publishProgress(datasetId, dataset, "processing", "Processed " + currentFile.processedRows + " rows from " + fileName(filePath), mutableAnalytics, totalFiles, fileProgress, false, true, includeDashboard);
                 }
             }
         }
@@ -431,11 +431,18 @@ public class CsvAnalyticsService {
                                   int totalFiles,
                                   List<MutableFileProgress> files,
                                   boolean complete,
+                                  boolean includeCharts,
                                   boolean includeDashboard) {
-        DashboardView partialDashboard = !includeDashboard || analytics.getProcessedRows() == 0
-                ? null
-                : dashboardViewService.toDashboardView(analytics.toSnapshot(dataset, totalFiles, Instant.now(), analyticsProperties));
-        publish(datasetId, stage, message, analytics.getScannedFiles(), totalFiles, analytics.getProcessedRows(), analytics.getFailedFiles(), toFileProgress(files), partialDashboard, complete);
+        CsvAnalyticsSnapshot snapshot = includeCharts || includeDashboard
+                ? analytics.toSnapshot(dataset, totalFiles, Instant.now(), analyticsProperties)
+                : null;
+        List<DashboardView.Chart> charts = includeCharts && snapshot != null
+                ? dashboardViewService.toDashboardCharts(snapshot)
+                : List.of();
+        DashboardView partialDashboard = includeDashboard && snapshot != null
+                ? dashboardViewService.toDashboardView(snapshot)
+                : null;
+        publish(datasetId, stage, message, analytics.getScannedFiles(), totalFiles, analytics.getProcessedRows(), analytics.getFailedFiles(), toFileProgress(files), charts, partialDashboard, complete);
     }
 
     private void publish(UUID datasetId,
@@ -443,11 +450,12 @@ public class CsvAnalyticsService {
                          String message,
                          int scannedFiles,
                          int totalFiles,
-                         int processedRows,
-                         int failedFiles,
-                         List<DashboardProgressEvent.FileProgress> files,
-                         DashboardView dashboard,
-                         boolean complete) {
+                          int processedRows,
+                          int failedFiles,
+                          List<DashboardProgressEvent.FileProgress> files,
+                          List<DashboardView.Chart> charts,
+                          DashboardView dashboard,
+                          boolean complete) {
         dashboardProgressService.publish(new DashboardProgressEvent(
                 datasetId.toString(),
                 stage,
@@ -457,6 +465,7 @@ public class CsvAnalyticsService {
                 processedRows,
                 failedFiles,
                 files,
+                charts,
                 dashboard,
                 complete
         ));
