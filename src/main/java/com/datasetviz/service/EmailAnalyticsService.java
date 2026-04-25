@@ -132,6 +132,8 @@ public class EmailAnalyticsService {
                 totalFiles,
                 processedRows,
                 failedFiles,
+                List.of(),
+                null,
                 complete
         ));
     }

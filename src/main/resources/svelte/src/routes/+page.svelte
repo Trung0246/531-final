@@ -135,13 +135,6 @@
 		return error instanceof Error ? error.message : 'Unexpected error';
 	}
 
-	function progressPercent(progress: DashboardProgressEvent | null) {
-		if (!progress || progress.totalFiles <= 0) {
-			return 0;
-		}
-		return Math.min(100, Math.round((progress.scannedFiles / progress.totalFiles) * 100));
-	}
-
 	function closeProgressSocket() {
 		progressSocket?.close();
 		progressSocket = null;
@@ -157,6 +150,9 @@
 			try {
 				const progress = JSON.parse(event.data) as DashboardProgressEvent;
 				dashboardProgress = progress;
+				if (progress.dashboard) {
+					dashboard = progress.dashboard;
+				}
 				if (!progress.complete) {
 					setMessage(progress.message, 'info');
 				}
@@ -536,13 +532,9 @@
 					<span>Existing dataset</span>
 					<select bind:value={selectedDatasetId} onchange={handleDatasetSelectionChange}>
 						{#each datasets as dataset}
-							<option value={dataset.id}>{dataset.name} • {dataset.datasetType}</option>
+							<option value={dataset.id}>{dataset.name}</option>
 						{/each}
 					</select>
-				</label>
-				<label>
-					<span>Processing type</span>
-					<input value={selectedDataset?.datasetType ?? ''} readonly />
 				</label>
 				<label class="wide-field">
 					<span>Dataset HDFS root</span>
@@ -595,7 +587,7 @@
 					<input type="file" multiple onchange={handleRemoteFileChange} />
 				</label>
 				<label>
-					<span>Upload processing type</span>
+					<span>Processing type</span>
 					<select bind:value={remoteDatasetType}>
 						<option value="CSV_TEXT">CSV_TEXT</option>
 						<option value="EMAIL_ARCHIVE">EMAIL_ARCHIVE</option>
@@ -662,7 +654,7 @@
 			</div>
 
 			<div class="flow-note dashboard-note">
-				Large CSV files stream row-by-row on the backend. The final dashboard still returns through GraphQL, while this panel listens for live scan progress.
+				Large CSV files stream row-by-row on the backend. The WebSocket channel updates file state and partial dashboard results while GraphQL returns the final snapshot.
 			</div>
 			{#if !selectedDatasetSupportsDashboard}
 				<div class="flow-note dashboard-note warning-note">
@@ -682,9 +674,23 @@
 							{dashboardProgress?.scannedFiles ?? 0}/{dashboardProgress?.totalFiles ?? 0} files · {dashboardProgress?.processedRows ?? 0} rows · {dashboardProgress?.failedFiles ?? 0} failed
 						</span>
 					</div>
-					<div class="progress-track" aria-label="Dashboard load progress">
-						<div class="progress-fill" style={`width: ${progressPercent(dashboardProgress)}%`}></div>
-					</div>
+					{#if dashboardProgress?.dashboard}
+						<div class="stream-note">Charts and previews below are live partial results and will continue updating until the scan completes.</div>
+					{/if}
+					{#if dashboardProgress?.files?.length}
+						<div class="file-progress-grid">
+							{#each dashboardProgress.files as file}
+								<article class={`file-progress-card ${file.status}`}>
+									<div>
+										<strong>{file.name}</strong>
+										<span>{file.status}</span>
+									</div>
+									<p>{file.processedRows} rows processed</p>
+									<small>{file.message}</small>
+								</article>
+							{/each}
+						</div>
+					{/if}
 				</div>
 			{/if}
 		</section>
@@ -1119,19 +1125,63 @@
 		color: #8fb2ff;
 	}
 
-	.progress-track {
-		height: 0.55rem;
-		overflow: hidden;
-		border-radius: 999px;
-		background: rgba(255, 255, 255, 0.08);
+	.stream-note {
+		padding: 0.75rem 0.85rem;
+		border-radius: 0.8rem;
+		background: rgba(88, 214, 141, 0.1);
+		color: #bdf3d0;
 	}
 
-	.progress-fill {
-		height: 100%;
-		min-width: 0.35rem;
-		border-radius: inherit;
-		background: linear-gradient(90deg, #6ea8fe, #58d68d);
-		transition: width 180ms ease;
+	.file-progress-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+		gap: 0.7rem;
+	}
+
+	.file-progress-card {
+		padding: 0.85rem;
+		border-radius: 0.9rem;
+		background: rgba(255, 255, 255, 0.04);
+		border: 1px solid rgba(255, 255, 255, 0.08);
+		display: grid;
+		gap: 0.45rem;
+	}
+
+	.file-progress-card div {
+		display: flex;
+		justify-content: space-between;
+		gap: 0.75rem;
+		align-items: start;
+	}
+
+	.file-progress-card span {
+		padding: 0.18rem 0.55rem;
+		border-radius: 999px;
+		background: rgba(255, 255, 255, 0.08);
+		color: #dfe7ff;
+		font-size: 0.72rem;
+		font-weight: 700;
+		text-transform: uppercase;
+	}
+
+	.file-progress-card p,
+	.file-progress-card small {
+		margin: 0;
+		color: #aab7d8;
+	}
+
+	.file-progress-card.processing {
+		border-color: rgba(110, 168, 254, 0.5);
+		background: rgba(110, 168, 254, 0.1);
+	}
+
+	.file-progress-card.complete {
+		border-color: rgba(88, 214, 141, 0.38);
+	}
+
+	.file-progress-card.failed {
+		border-color: rgba(255, 123, 123, 0.5);
+		background: rgba(255, 123, 123, 0.1);
 	}
 
 	.message {

@@ -7,6 +7,7 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -27,7 +28,7 @@ public class DashboardProgressService {
 
     public void subscribe(String datasetId, WebSocketSession session) {
         sessionsByDataset.computeIfAbsent(datasetId, ignored -> ConcurrentHashMap.newKeySet()).add(session);
-        publishToSession(session, new DashboardProgressEvent(datasetId, "connected", "Live dashboard progress connected.", 0, 0, 0, 0, false));
+        publishToSession(session, new DashboardProgressEvent(datasetId, "connected", "Live dashboard progress connected.", 0, 0, 0, 0, List.of(), null, false));
     }
 
     public void unsubscribe(WebSocketSession session) {

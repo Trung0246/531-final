@@ -76,7 +76,17 @@ export interface DashboardProgressEvent {
 	totalFiles: number;
 	processedRows: number;
 	failedFiles: number;
+	files: DashboardFileProgress[];
+	dashboard: DashboardView | null;
 	complete: boolean;
+}
+
+export interface DashboardFileProgress {
+	path: string;
+	name: string;
+	status: 'queued' | 'processing' | 'complete' | 'failed' | string;
+	processedRows: number;
+	message: string;
 }
 
 export interface RegisterDatasetInput {
