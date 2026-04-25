@@ -82,9 +82,12 @@ public class DatasetController {
 
     @GetMapping("/{datasetId}/files")
     public List<HdfsFileDescriptor> listFiles(@PathVariable UUID datasetId,
-                                              @RequestParam(defaultValue = "50") int limit,
-                                              @RequestParam(defaultValue = "true") boolean recursive) throws IOException {
+                                               @RequestParam(defaultValue = "50") int limit,
+                                               @RequestParam(defaultValue = "true") boolean recursive) throws IOException {
         DatasetRegistration dataset = datasetRegistryService.getRequired(datasetId);
+        if (!hdfsStorageService.exists(dataset.getHdfsPath())) {
+            return List.of();
+        }
         return hdfsStorageService.listFiles(dataset.getHdfsPath(), recursive, Math.max(1, limit));
     }
 }

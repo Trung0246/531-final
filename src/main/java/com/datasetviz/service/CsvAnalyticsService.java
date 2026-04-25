@@ -1,6 +1,8 @@
 package com.datasetviz.service;
 
 import com.datasetviz.config.AnalyticsProperties;
+import com.datasetviz.dto.DashboardProgressEvent;
+import com.datasetviz.model.ColumnProfile;
 import com.datasetviz.model.CsvAnalyticsOverview;
 import com.datasetviz.model.CsvAnalyticsSnapshot;
 import com.datasetviz.model.DatasetRegistration;
@@ -18,6 +20,7 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedInputStream;
@@ -38,6 +41,7 @@ import java.time.temporal.TemporalAccessor;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -51,6 +55,10 @@ import java.util.concurrent.ConcurrentMap;
 
 @Service
 public class CsvAnalyticsService {
+
+    private static final int SCHEMA_SAMPLE_SIZE = 100;
+    private static final int COLUMN_SAMPLE_LIMIT = 10;
+    private static final int ROW_PROGRESS_INTERVAL = 5_000;
 
     private static final List<String> DATE_COLUMN_CANDIDATES = List.of(
             "observationdate", "date", "reportdate", "lastupdate", "lastupdated", "updatedate"
@@ -80,14 +88,24 @@ public class CsvAnalyticsService {
     private final DatasetRegistryService datasetRegistryService;
     private final HdfsStorageService hdfsStorageService;
     private final AnalyticsProperties analyticsProperties;
+    private final DashboardProgressService dashboardProgressService;
     private final ConcurrentMap<String, CachedSnapshot> cache = new ConcurrentHashMap<>();
 
     public CsvAnalyticsService(DatasetRegistryService datasetRegistryService,
                                HdfsStorageService hdfsStorageService,
                                AnalyticsProperties analyticsProperties) {
+        this(datasetRegistryService, hdfsStorageService, analyticsProperties, new DashboardProgressService());
+    }
+
+    @Autowired
+    public CsvAnalyticsService(DatasetRegistryService datasetRegistryService,
+                               HdfsStorageService hdfsStorageService,
+                               AnalyticsProperties analyticsProperties,
+                               DashboardProgressService dashboardProgressService) {
         this.datasetRegistryService = datasetRegistryService;
         this.hdfsStorageService = hdfsStorageService;
         this.analyticsProperties = analyticsProperties;
+        this.dashboardProgressService = dashboardProgressService;
     }
 
     public CsvAnalyticsSnapshot analyze(UUID datasetId, Integer requestedMaxFiles, boolean refresh) throws IOException {
@@ -100,32 +118,39 @@ public class CsvAnalyticsService {
         String cacheKey = datasetId + ":" + maxFiles;
         CachedSnapshot cachedSnapshot = cache.get(cacheKey);
         if (!refresh && cachedSnapshot != null && !cachedSnapshot.isExpired(analyticsProperties.getCacheTtl().toMillis())) {
+            publish(datasetId, "cache", "Loaded dashboard analytics from cache.", cachedSnapshot.snapshot().getOverview().getScannedFiles(), cachedSnapshot.snapshot().getOverview().getScannedFiles(), cachedSnapshot.snapshot().getOverview().getProcessedRows(), cachedSnapshot.snapshot().getOverview().getFailedFiles(), true);
             return cachedSnapshot.snapshot();
         }
 
+        publish(datasetId, "starting", "Preparing CSV/text analytics.", 0, 0, 0, 0, false);
         if (!hdfsStorageService.exists(dataset.getHdfsPath())) {
             throw new IllegalArgumentException("HDFS path does not exist: " + dataset.getHdfsPath());
         }
 
         MutableAnalytics mutableAnalytics = new MutableAnalytics();
         List<String> filePaths = hdfsStorageService.listFilePaths(dataset.getHdfsPath(), maxFiles);
+        publish(datasetId, "listed", "Found " + filePaths.size() + " file(s) to scan.", 0, filePaths.size(), 0, 0, false);
         for (String filePath : filePaths) {
             mutableAnalytics.incrementScannedFiles();
+            publishProgress(datasetId, "processing", "Scanning " + fileName(filePath), mutableAnalytics, filePaths.size(), false);
             try (InputStream inputStream = hdfsStorageService.open(filePath)) {
-                analyzeFile(inputStream, filePath, mutableAnalytics);
+                analyzeFile(datasetId, inputStream, filePath, mutableAnalytics, filePaths.size());
             } catch (Exception exception) {
                 mutableAnalytics.incrementFailedFiles();
+                publishProgress(datasetId, "warning", "Skipped " + fileName(filePath) + ": " + exception.getMessage(), mutableAnalytics, filePaths.size(), false);
             }
         }
 
         CsvAnalyticsSnapshot snapshot = mutableAnalytics.toSnapshot(dataset, maxFiles, Instant.now(), analyticsProperties);
         cache.put(cacheKey, new CachedSnapshot(Instant.now(), snapshot));
+        publish(datasetId, "complete", "Dashboard analytics ready.", snapshot.getOverview().getScannedFiles(), filePaths.size(), snapshot.getOverview().getProcessedRows(), snapshot.getOverview().getFailedFiles(), true);
         return snapshot;
     }
 
-    private void analyzeFile(InputStream inputStream, String filePath, MutableAnalytics mutableAnalytics) throws IOException {
+    private void analyzeFile(UUID datasetId, InputStream inputStream, String filePath, MutableAnalytics mutableAnalytics, int totalFiles) throws IOException {
         if (isSpreadsheetFile(filePath)) {
             analyzeSpreadsheetFile(inputStream, mutableAnalytics);
+            publishProgress(datasetId, "processing", "Finished " + fileName(filePath), mutableAnalytics, totalFiles, false);
             return;
         }
 
@@ -141,14 +166,28 @@ public class CsvAnalyticsService {
             if (headers == null || headers.isEmpty()) {
                 throw new IllegalArgumentException("CSV file is missing headers");
             }
-            List<TabularRecord> records = parser.getRecords().stream()
-                    .map(record -> new TabularRecord(record.toMap()))
-                    .toList();
-            FileSchema schema = detectSchema(headers, records);
+            List<TabularRecord> sampleRecords = new ArrayList<>();
+            Iterator<CSVRecord> iterator = parser.iterator();
+            while (iterator.hasNext() && sampleRecords.size() < SCHEMA_SAMPLE_SIZE) {
+                sampleRecords.add(new TabularRecord(iterator.next()));
+            }
+
+            FileSchema schema = detectSchema(headers, sampleRecords);
             if (schema.metricColumns().isEmpty()) {
                 throw new IllegalArgumentException("CSV file does not contain detectable numeric metric columns");
             }
-            mutableAnalytics.acceptFile(schema, records);
+
+            mutableAnalytics.acceptSchema(schema);
+            for (TabularRecord record : sampleRecords) {
+                mutableAnalytics.acceptRecord(schema, record);
+            }
+
+            while (iterator.hasNext()) {
+                mutableAnalytics.acceptRecord(schema, new TabularRecord(iterator.next()));
+                if (mutableAnalytics.getProcessedRows() % ROW_PROGRESS_INTERVAL == 0) {
+                    publishProgress(datasetId, "processing", "Processed " + mutableAnalytics.getProcessedRows() + " rows from " + fileName(filePath), mutableAnalytics, totalFiles, false);
+                }
+            }
         }
     }
 
@@ -227,7 +266,7 @@ public class CsvAnalyticsService {
             }
         }
 
-        return new FileSchema(dateColumn, locationColumn, metricColumns);
+        return new FileSchema(dateColumn, locationColumn, metricColumns, headers);
     }
 
     private boolean isNumericColumn(String header, List<?> records) {
@@ -336,6 +375,28 @@ public class CsvAnalyticsService {
         }
     }
 
+    private void publishProgress(UUID datasetId, String stage, String message, MutableAnalytics analytics, int totalFiles, boolean complete) {
+        publish(datasetId, stage, message, analytics.getScannedFiles(), totalFiles, analytics.getProcessedRows(), analytics.getFailedFiles(), complete);
+    }
+
+    private void publish(UUID datasetId, String stage, String message, int scannedFiles, int totalFiles, int processedRows, int failedFiles, boolean complete) {
+        dashboardProgressService.publish(new DashboardProgressEvent(
+                datasetId.toString(),
+                stage,
+                message,
+                scannedFiles,
+                totalFiles,
+                processedRows,
+                failedFiles,
+                complete
+        ));
+    }
+
+    private String fileName(String filePath) {
+        int slashIndex = filePath == null ? -1 : filePath.lastIndexOf('/');
+        return slashIndex >= 0 ? filePath.substring(slashIndex + 1) : String.valueOf(filePath);
+    }
+
     private static final class MutableAnalytics {
 
         private int scannedFiles;
@@ -349,6 +410,7 @@ public class CsvAnalyticsService {
         private final Map<String, Map<LocalDate, Long>> metricByDate = new LinkedHashMap<>();
         private final Map<String, Map<String, Map<LocalDate, Long>>> metricByLocationDate = new LinkedHashMap<>();
         private final Map<String, Long> metricTotalsWithoutDate = new LinkedHashMap<>();
+        private final Map<String, ColumnAccumulator> columnAccumulators = new LinkedHashMap<>();
         private LocalDate firstObservedDate;
         private LocalDate lastObservedDate;
 
@@ -360,7 +422,26 @@ public class CsvAnalyticsService {
             failedFiles++;
         }
 
+        int getScannedFiles() {
+            return scannedFiles;
+        }
+
+        int getProcessedRows() {
+            return processedRows;
+        }
+
+        int getFailedFiles() {
+            return failedFiles;
+        }
+
         void acceptFile(FileSchema schema, List<?> records) {
+            acceptSchema(schema);
+            for (Object rawRecord : records) {
+                acceptRecord(schema, rawRecord);
+            }
+        }
+
+        void acceptSchema(FileSchema schema) {
             if (dateColumn == null && schema.dateColumn() != null) {
                 dateColumn = schema.dateColumn();
             }
@@ -368,54 +449,61 @@ public class CsvAnalyticsService {
                 locationColumn = schema.locationColumn();
             }
             metricColumns.addAll(schema.metricColumns());
+            schema.headers().forEach(header -> columnAccumulators.computeIfAbsent(header, ColumnAccumulator::new));
+        }
 
-            for (Object rawRecord : records) {
-                TabularRecord record = asTabularRecord(rawRecord);
-                processedRows++;
+        void acceptRecord(FileSchema schema, Object rawRecord) {
+            TabularRecord record = asTabularRecord(rawRecord);
+            processedRows++;
 
-                LocalDate observationDate = schema.dateColumn() == null || !record.isMapped(schema.dateColumn())
-                        ? null
-                        : parseCsvDate(record.get(schema.dateColumn())).orElse(null);
+            for (String header : schema.headers()) {
+                if (record.isMapped(header)) {
+                    columnAccumulators.computeIfAbsent(header, ColumnAccumulator::new).accept(record.get(header));
+                }
+            }
+
+            LocalDate observationDate = schema.dateColumn() == null || !record.isMapped(schema.dateColumn())
+                    ? null
+                    : parseCsvDate(record.get(schema.dateColumn())).orElse(null);
+            if (observationDate != null) {
+                rowsByDate.merge(observationDate, 1L, Long::sum);
+                if (firstObservedDate == null || observationDate.isBefore(firstObservedDate)) {
+                    firstObservedDate = observationDate;
+                }
+                if (lastObservedDate == null || observationDate.isAfter(lastObservedDate)) {
+                    lastObservedDate = observationDate;
+                }
+            }
+
+            String location = resolveLocation(record, schema.locationColumn());
+            if (location != null) {
+                distinctLocations.add(location);
+            }
+
+            for (String metricColumn : schema.metricColumns()) {
+                if (!record.isMapped(metricColumn)) {
+                    continue;
+                }
+
+                Long value = parseCsvNumber(record.get(metricColumn)).orElse(null);
+                if (value == null) {
+                    continue;
+                }
+
+                metricByDate.computeIfAbsent(metricColumn, ignored -> new HashMap<>());
+                metricByLocationDate.computeIfAbsent(metricColumn, ignored -> new LinkedHashMap<>());
+
                 if (observationDate != null) {
-                    rowsByDate.merge(observationDate, 1L, Long::sum);
-                    if (firstObservedDate == null || observationDate.isBefore(firstObservedDate)) {
-                        firstObservedDate = observationDate;
-                    }
-                    if (lastObservedDate == null || observationDate.isAfter(lastObservedDate)) {
-                        lastObservedDate = observationDate;
-                    }
+                    metricByDate.get(metricColumn).merge(observationDate, value, Long::sum);
+                } else {
+                    metricTotalsWithoutDate.merge(metricColumn, value, Long::sum);
                 }
 
-                String location = resolveLocation(record, schema.locationColumn());
                 if (location != null) {
-                    distinctLocations.add(location);
-                }
-
-                for (String metricColumn : schema.metricColumns()) {
-                    if (!record.isMapped(metricColumn)) {
-                        continue;
-                    }
-
-                    Long value = parseCsvNumber(record.get(metricColumn)).orElse(null);
-                    if (value == null) {
-                        continue;
-                    }
-
-                    metricByDate.computeIfAbsent(metricColumn, ignored -> new HashMap<>());
-                    metricByLocationDate.computeIfAbsent(metricColumn, ignored -> new LinkedHashMap<>());
-
-                    if (observationDate != null) {
-                        metricByDate.get(metricColumn).merge(observationDate, value, Long::sum);
-                    } else {
-                        metricTotalsWithoutDate.merge(metricColumn, value, Long::sum);
-                    }
-
-                    if (location != null) {
-                        LocalDate locationBucket = observationDate == null ? LocalDate.MIN : observationDate;
-                        metricByLocationDate.get(metricColumn)
-                                .computeIfAbsent(location, ignored -> new HashMap<>())
-                                .merge(locationBucket, value, Long::sum);
-                    }
+                    LocalDate locationBucket = observationDate == null ? LocalDate.MIN : observationDate;
+                    metricByLocationDate.get(metricColumn)
+                            .computeIfAbsent(location, ignored -> new HashMap<>())
+                            .merge(locationBucket, value, Long::sum);
                 }
             }
         }
@@ -448,6 +536,7 @@ public class CsvAnalyticsService {
             snapshot.setMetricTimeSeries(toMetricTimeSeries());
             snapshot.setMetricTotals(toMetricTotals());
             snapshot.setTopLocationsByMetric(toTopLocationsByMetric(analyticsProperties.getDefaultTopLimit()));
+            snapshot.setColumnProfiles(toColumnProfiles());
             return snapshot;
         }
 
@@ -504,6 +593,12 @@ public class CsvAnalyticsService {
                     .toList();
         }
 
+        private List<ColumnProfile> toColumnProfiles() {
+            return columnAccumulators.values().stream()
+                    .map(ColumnAccumulator::toProfile)
+                    .toList();
+        }
+
         private Comparator<NamedCount> countComparator() {
             return Comparator.comparingLong(NamedCount::getCount)
                     .reversed()
@@ -549,7 +644,60 @@ public class CsvAnalyticsService {
         throw new IllegalArgumentException("Unsupported tabular record type: " + rawRecord);
     }
 
-    private record FileSchema(String dateColumn, String locationColumn, List<String> metricColumns) {
+    private record FileSchema(String dateColumn, String locationColumn, List<String> metricColumns, List<String> headers) {
+        private FileSchema(String dateColumn, String locationColumn, List<String> metricColumns) {
+            this(dateColumn, locationColumn, metricColumns, List.of());
+        }
+    }
+
+    private static final class ColumnAccumulator {
+        private final String name;
+        private final List<String> sampleValues = new ArrayList<>();
+        private int nonBlankValues;
+        private int numericValues;
+        private int dateValues;
+
+        private ColumnAccumulator(String name) {
+            this.name = name;
+        }
+
+        private void accept(String rawValue) {
+            if (rawValue == null || rawValue.isBlank()) {
+                return;
+            }
+
+            String value = rawValue.trim();
+            nonBlankValues++;
+            if (parseCsvNumber(value).isPresent()) {
+                numericValues++;
+            }
+            if (parseCsvDate(value).isPresent()) {
+                dateValues++;
+            }
+            if (sampleValues.size() < COLUMN_SAMPLE_LIMIT) {
+                sampleValues.add(value);
+            }
+        }
+
+        private ColumnProfile toProfile() {
+            return new ColumnProfile(name, inferredType(), List.copyOf(sampleValues));
+        }
+
+        private String inferredType() {
+            if (nonBlankValues == 0) {
+                return "EMPTY";
+            }
+            if (numericValues == nonBlankValues) {
+                return "NUMBER";
+            }
+            if (dateValues == nonBlankValues) {
+                return "DATE";
+            }
+            if (numericValues > 0 || dateValues > 0) {
+                return "MIXED";
+            }
+            return "TEXT";
+        }
     }
 
     private static final class TabularRecord {

@@ -8,6 +8,7 @@ import com.datasetviz.dto.DatasetView;
 import com.datasetviz.dto.ImportLocalDirectoryRequest;
 import com.datasetviz.dto.RegisterDatasetRequest;
 import com.datasetviz.model.AnalyticsOverview;
+import com.datasetviz.model.ColumnProfile;
 import com.datasetviz.model.CommunicationEdge;
 import com.datasetviz.model.CsvAnalyticsOverview;
 import com.datasetviz.model.CsvAnalyticsSnapshot;
@@ -111,6 +112,7 @@ class BackendServiceTest {
 
         when(datasetRegistryService.updateDatasetType(any(UUID.class), any(DatasetType.class))).thenReturn(registration);
         when(datasetRegistryService.getRequired(datasetId)).thenReturn(registration);
+        when(hdfsStorageService.exists("/datasets/import")).thenReturn(true);
         when(hdfsStorageService.listFiles("/datasets/import", true, 500)).thenReturn(List.of(descriptor));
 
         List<HdfsFileDescriptor> result = service.importLocalDirectory(request);
@@ -149,6 +151,7 @@ class BackendServiceTest {
 
         when(datasetRegistryService.updateDatasetType(any(UUID.class), any(DatasetType.class))).thenReturn(registration);
         when(datasetRegistryService.getRequired(datasetId)).thenReturn(registration);
+        when(hdfsStorageService.exists("/datasets/import")).thenReturn(true);
         when(hdfsStorageService.listFiles("/datasets/import", true, 500)).thenReturn(List.of());
 
         List<HdfsFileDescriptor> result = service.importLocalDirectory(request);
@@ -170,6 +173,7 @@ class BackendServiceTest {
 
         when(datasetRegistryService.updateDatasetType(any(UUID.class), any(DatasetType.class))).thenReturn(registration);
         when(datasetRegistryService.getRequired(datasetId)).thenReturn(registration);
+        when(hdfsStorageService.exists("/datasets/import")).thenReturn(true);
         when(hdfsStorageService.listFiles("/datasets/import", true, 500)).thenReturn(List.of(descriptor));
         when(hdfsStorageService.delete("/datasets/import/uploads/data.csv")).thenReturn(true);
 
@@ -306,6 +310,7 @@ class BackendServiceTest {
                 new MetricBreakdown("Confirmed", List.of(new NamedCount("Calgary", 50), new NamedCount("Edmonton", 20))),
                 new MetricBreakdown("Recovered", List.of(new NamedCount("Calgary", 25), new NamedCount("Edmonton", 5)))
         ));
+        snapshot.setColumnProfiles(List.of(new ColumnProfile("Confirmed", "NUMBER", List.of("40", "70"))));
 
         DashboardView dashboard = service.toDashboardView(snapshot);
 
@@ -313,6 +318,9 @@ class BackendServiceTest {
         assertThat(dashboard.charts()).hasSize(4);
         assertThat(dashboard.charts().get(3).series()).extracting(DashboardView.Series::name).containsExactly("Confirmed", "Recovered");
         assertThat(dashboard.listPanel().items()).contains("Metric: Confirmed", "Recovered: 30");
+        assertThat(dashboard.columnProfiles()).singleElement()
+                .extracting(DashboardView.ColumnPreview::name, DashboardView.ColumnPreview::type)
+                .containsExactly("Confirmed", "NUMBER");
         assertThat(dashboard.tablePanel().columns()).containsExactly("Location", "Confirmed", "Recovered");
         assertThat(dashboard.tablePanel().rows().get(0).cells().get(0)).isEqualTo("Calgary");
 

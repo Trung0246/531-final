@@ -33,6 +33,12 @@ export interface DashboardChart {
 	series: DashboardSeries[];
 }
 
+export interface DashboardColumnProfile {
+	name: string;
+	type: string;
+	sampleValues: string[];
+}
+
 export interface DashboardListPanel {
 	title: string;
 	items: string[];
@@ -57,8 +63,20 @@ export interface DashboardView {
 	maxFiles: number;
 	summaryItems: DashboardSummaryItem[];
 	charts: DashboardChart[];
+	columnProfiles: DashboardColumnProfile[];
 	listPanel: DashboardListPanel | null;
 	tablePanel: DashboardTablePanel | null;
+}
+
+export interface DashboardProgressEvent {
+	datasetId: string;
+	stage: string;
+	message: string;
+	scannedFiles: number;
+	totalFiles: number;
+	processedRows: number;
+	failedFiles: number;
+	complete: boolean;
 }
 
 export interface RegisterDatasetInput {

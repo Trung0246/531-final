@@ -191,6 +191,8 @@ class ModelAndDtoTest {
         snapshot.setMetricTimeSeries(List.of(metricSeries));
         snapshot.setMetricTotals(List.of(namedCount));
         snapshot.setTopLocationsByMetric(List.of(metricBreakdown));
+        ColumnProfile columnProfile = new ColumnProfile("Confirmed", "NUMBER", List.of("1"));
+        snapshot.setColumnProfiles(List.of(columnProfile));
         assertThat(snapshot.getDatasetId()).isNotNull();
         assertThat(snapshot.getDatasetName()).isEqualTo("csv");
         assertThat(snapshot.getDatasetType()).isEqualTo(DatasetType.CSV_TEXT);
@@ -201,6 +203,7 @@ class ModelAndDtoTest {
         assertThat(snapshot.getMetricTimeSeries()).containsExactly(metricSeries);
         assertThat(snapshot.getMetricTotals()).containsExactly(namedCount);
         assertThat(snapshot.getTopLocationsByMetric()).containsExactly(metricBreakdown);
+        assertThat(snapshot.getColumnProfiles()).containsExactly(columnProfile);
 
         RegisterDatasetRequest registerRequest = new RegisterDatasetRequest();
         registerRequest.setName("name");

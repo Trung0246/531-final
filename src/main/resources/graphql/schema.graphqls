@@ -38,6 +38,7 @@ type DashboardSnapshot {
   maxFiles: Int!
   summaryItems: [DashboardSummaryItem!]!
   charts: [DashboardChart!]!
+  columnProfiles: [DashboardColumnProfile!]!
   listPanel: DashboardListPanel
   tablePanel: DashboardTablePanel
 }
@@ -62,6 +63,12 @@ type DashboardSeries {
 type DashboardPoint {
   label: String!
   value: Float!
+}
+
+type DashboardColumnProfile {
+  name: String!
+  type: String!
+  sampleValues: [String!]!
 }
 
 type DashboardListPanel {

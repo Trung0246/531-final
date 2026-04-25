@@ -143,6 +143,7 @@ class ControllerTest {
                 10,
                 List.of(new DashboardView.SummaryItem("Dataset", "dataset")),
                 List.of(),
+                List.of(),
                 null,
                 null
         );

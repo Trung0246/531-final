@@ -13,6 +13,7 @@ public record DashboardView(
         int maxFiles,
         List<SummaryItem> summaryItems,
         List<Chart> charts,
+        List<ColumnPreview> columnProfiles,
         ListPanel listPanel,
         TablePanel tablePanel
 ) {
@@ -27,6 +28,9 @@ public record DashboardView(
     }
 
     public record Point(String label, double value) {
+    }
+
+    public record ColumnPreview(String name, String type, List<String> sampleValues) {
     }
 
     public record ListPanel(String title, List<String> items) {

@@ -95,6 +95,9 @@ public class DatasetImportService {
 
     public List<HdfsFileDescriptor> listDatasetFiles(UUID datasetId, int limit) throws IOException {
         DatasetRegistration dataset = datasetRegistryService.getRequired(datasetId);
+        if (!hdfsStorageService.exists(dataset.getHdfsPath())) {
+            return List.of();
+        }
         return hdfsStorageService.listFiles(dataset.getHdfsPath(), true, Math.max(1, limit));
     }
 

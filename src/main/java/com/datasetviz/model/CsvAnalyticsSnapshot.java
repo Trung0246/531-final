@@ -18,6 +18,7 @@ public class CsvAnalyticsSnapshot {
     private List<MetricSeries> metricTimeSeries = new ArrayList<>();
     private List<NamedCount> metricTotals = new ArrayList<>();
     private List<MetricBreakdown> topLocationsByMetric = new ArrayList<>();
+    private List<ColumnProfile> columnProfiles = new ArrayList<>();
 
     public UUID getDatasetId() {
         return datasetId;
@@ -105,5 +106,13 @@ public class CsvAnalyticsSnapshot {
 
     public void setTopLocationsByMetric(List<MetricBreakdown> topLocationsByMetric) {
         this.topLocationsByMetric = topLocationsByMetric;
+    }
+
+    public List<ColumnProfile> getColumnProfiles() {
+        return columnProfiles;
+    }
+
+    public void setColumnProfiles(List<ColumnProfile> columnProfiles) {
+        this.columnProfiles = columnProfiles;
     }
 }

@@ -2,6 +2,7 @@ package com.datasetviz.service;
 
 import com.datasetviz.dto.DashboardView;
 import com.datasetviz.dto.DatasetView;
+import com.datasetviz.model.ColumnProfile;
 import com.datasetviz.model.CommunicationEdge;
 import com.datasetviz.model.CsvAnalyticsOverview;
 import com.datasetviz.model.CsvAnalyticsSnapshot;
@@ -76,6 +77,7 @@ public class DashboardViewService {
                 snapshot.getMaxFiles(),
                 summaryItems,
                 charts,
+                List.of(),
                 new DashboardView.ListPanel("Top subject keywords", snapshot.getTopSubjectKeywords().stream()
                         .map(item -> item.getName() + " (" + item.getCount() + ")")
                         .toList()),
@@ -128,12 +130,19 @@ public class DashboardViewService {
                 snapshot.getMaxFiles(),
                 summaryItems,
                 charts,
+                toColumnPreviews(snapshot.getColumnProfiles()),
                 new DashboardView.ListPanel(
                         "Detected schema and totals",
                         buildCsvListItems(overview, snapshot.getMetricTotals())
                 ),
                 buildCsvTable(topLocationBreakdowns)
         );
+    }
+
+    private List<DashboardView.ColumnPreview> toColumnPreviews(List<ColumnProfile> columnProfiles) {
+        return columnProfiles == null ? List.of() : columnProfiles.stream()
+                .map(profile -> new DashboardView.ColumnPreview(profile.getName(), profile.getType(), profile.getSampleValues()))
+                .toList();
     }
 
     private List<String> buildCsvListItems(CsvAnalyticsOverview overview, List<NamedCount> metricTotals) {

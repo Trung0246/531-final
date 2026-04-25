@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import ChartPanel from '$lib/components/ChartPanel.svelte';
 	import { graphqlRequest } from '$lib/graphql';
 	import type {
 		ChartMode,
 		DashboardChart,
+		DashboardProgressEvent,
 		DashboardView,
 		DatasetView,
 		HdfsFileDescriptor,
@@ -50,6 +51,11 @@
 							value
 						}
 					}
+				}
+				columnProfiles {
+					name
+					type
+					sampleValues
 				}
 				listPanel {
 					title
@@ -98,6 +104,8 @@
 	let isLoadingDashboard = $state(false);
 	let isLoadingDatasets = $state(false);
 	let message = $state<MessageState>({ text: '', type: 'info' });
+	let dashboardProgress = $state<DashboardProgressEvent | null>(null);
+	let progressSocket = $state<WebSocket | null>(null);
 	let form = $state<RegisterDatasetInput>({
 		name: '',
 	description: '',
@@ -115,6 +123,9 @@
 	let deleteFilePath = $state('');
 
 	let selectedDataset = $derived(datasets.find((dataset) => dataset.id === selectedDatasetId) ?? null);
+	let selectedDatasetSupportsDashboard = $derived(
+		selectedDataset?.datasetType === 'CSV_TEXT' || selectedDataset?.datasetType === 'EMAIL_ARCHIVE'
+	);
 
 	function setMessage(text: string, type: 'info' | 'success' | 'error' = 'info') {
 		message = { text, type };
@@ -122,6 +133,41 @@
 
 	function toMessage(error: unknown) {
 		return error instanceof Error ? error.message : 'Unexpected error';
+	}
+
+	function progressPercent(progress: DashboardProgressEvent | null) {
+		if (!progress || progress.totalFiles <= 0) {
+			return 0;
+		}
+		return Math.min(100, Math.round((progress.scannedFiles / progress.totalFiles) * 100));
+	}
+
+	function closeProgressSocket() {
+		progressSocket?.close();
+		progressSocket = null;
+	}
+
+	function openProgressSocket(datasetId: string) {
+		closeProgressSocket();
+		const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+		const socket = new WebSocket(`${protocol}//${window.location.host}/ws/dashboard-progress?datasetId=${encodeURIComponent(datasetId)}`);
+		progressSocket = socket;
+
+		socket.onmessage = (event) => {
+			try {
+				const progress = JSON.parse(event.data) as DashboardProgressEvent;
+				dashboardProgress = progress;
+				if (!progress.complete) {
+					setMessage(progress.message, 'info');
+				}
+			} catch {
+				// Ignore non-JSON ping/pong frames from the raw progress channel.
+			}
+		};
+
+		socket.onerror = () => {
+			setMessage('Live dashboard progress is unavailable; the dashboard request is still running.', 'info');
+		};
 	}
 
 	async function restRequest<T>(url: string, init: RequestInit = {}): Promise<T> {
@@ -241,11 +287,18 @@
 			files = [];
 			return;
 		}
-		files = await restRequest<HdfsFileDescriptor[]>(`/api/datasets/${selectedDatasetId}/files?limit=200&recursive=true`);
+		try {
+			files = await restRequest<HdfsFileDescriptor[]>(`/api/datasets/${selectedDatasetId}/files?limit=200&recursive=true`);
+		} catch (error) {
+			files = [];
+			setMessage(toMessage(error), 'error');
+		}
 	}
 
 	async function handleDatasetSelectionChange() {
 		dashboard = null;
+		dashboardProgress = null;
+		closeProgressSocket();
 		deleteFilePath = '';
 		await loadFiles();
 	}
@@ -255,8 +308,18 @@
 			setMessage('Register or select a dataset before loading analytics.', 'error');
 			return;
 		}
+		if (!selectedDatasetSupportsDashboard) {
+			setMessage('Import or upload files as CSV_TEXT or EMAIL_ARCHIVE before loading analytics.', 'error');
+			return;
+		}
+		if (files.length === 0) {
+			setMessage('This dataset has no files in HDFS. Import or upload files before loading analytics.', 'error');
+			return;
+		}
 
 		isLoadingDashboard = true;
+		dashboardProgress = null;
+		openProgressSocket(selectedDatasetId);
 		setMessage('Loading dashboard...', 'info');
 		try {
 			const data = await graphqlRequest<{ dashboard: DashboardView }>(DASHBOARD_QUERY, {
@@ -272,6 +335,7 @@
 			setMessage(toMessage(error), 'error');
 		} finally {
 			isLoadingDashboard = false;
+			closeProgressSocket();
 		}
 	}
 
@@ -399,6 +463,10 @@
 			setMessage(toMessage(error), 'error');
 		}
 	});
+
+	onDestroy(() => {
+		closeProgressSocket();
+	});
 </script>
 
 <svelte:head>
@@ -415,8 +483,8 @@
 			<p class="eyebrow">Visualization-first analytics</p>
 			<h1>Dataset visualization cockpit</h1>
 			<p class="lede">
-				Register HDFS datasets, fetch analytics through GraphQL, and let the backend describe the
-				dashboard layout.
+				Register HDFS datasets, keep GraphQL/HTTP for control operations, and use the live WebSocket
+				channel for long-running dashboard progress.
 			</p>
 		</div>
 		<div class="hero-meta">
@@ -427,6 +495,10 @@
 			<div>
 				<span class="meta-label">Endpoint</span>
 				<strong>/graphql</strong>
+			</div>
+			<div>
+				<span class="meta-label">Live channel</span>
+				<strong>/ws/dashboard-progress</strong>
 			</div>
 		</div>
 	</section>
@@ -507,7 +579,7 @@
 				</label>
 				<label>
 					<span>Server directory</span>
-					<input bind:value={importForm.localDirectory} placeholder="/path/on/server/covid" />
+					<input bind:value={importForm.localDirectory} placeholder="/mnt/main/trung/Text/Data" />
 				</label>
 				<label>
 					<span>Target subdirectory</span>
@@ -568,7 +640,12 @@
 					<p class="eyebrow">Dashboard manager</p>
 					<h2>Process and visualize data</h2>
 				</div>
-				<button class="primary-button" type="button" onclick={loadDashboard} disabled={isLoadingDashboard || isLoadingDatasets}>
+				<button
+					class="primary-button"
+					type="button"
+					onclick={loadDashboard}
+					disabled={isLoadingDashboard || isLoadingDatasets || !selectedDatasetSupportsDashboard || files.length === 0}
+				>
 					{isLoadingDashboard ? 'Loading…' : 'Load dashboard'}
 				</button>
 			</div>
@@ -583,6 +660,33 @@
 					<span>Force refresh</span>
 				</label>
 			</div>
+
+			<div class="flow-note dashboard-note">
+				Large CSV files stream row-by-row on the backend. The final dashboard still returns through GraphQL, while this panel listens for live scan progress.
+			</div>
+			{#if !selectedDatasetSupportsDashboard}
+				<div class="flow-note dashboard-note warning-note">
+					This dataset is still marked as {selectedDataset.datasetType}. Import or upload files with CSV_TEXT or EMAIL_ARCHIVE selected before loading analytics.
+				</div>
+			{:else if files.length === 0}
+				<div class="flow-note dashboard-note warning-note">
+					No files are visible under this dataset HDFS root. Import or upload files before loading analytics.
+				</div>
+			{/if}
+
+			{#if isLoadingDashboard || dashboardProgress}
+				<div class="progress-panel">
+					<div class="progress-copy">
+						<strong>{dashboardProgress?.message ?? 'Starting dashboard load...'}</strong>
+						<span>
+							{dashboardProgress?.scannedFiles ?? 0}/{dashboardProgress?.totalFiles ?? 0} files · {dashboardProgress?.processedRows ?? 0} rows · {dashboardProgress?.failedFiles ?? 0} failed
+						</span>
+					</div>
+					<div class="progress-track" aria-label="Dashboard load progress">
+						<div class="progress-fill" style={`width: ${progressPercent(dashboardProgress)}%`}></div>
+					</div>
+				</div>
+			{/if}
 		</section>
 	{/if}
 
@@ -597,6 +701,37 @@
 				</article>
 			{/each}
 		</section>
+
+		{#if dashboard.columnProfiles.length > 0}
+			<section class="panel preview-panel">
+				<div class="panel-heading small-heading">
+					<div>
+						<p class="eyebrow">Column preview</p>
+						<h2>First 10 values by detected type</h2>
+					</div>
+					<span class="preview-count">{dashboard.columnProfiles.length} columns</span>
+				</div>
+				<div class="column-preview-grid">
+					{#each dashboard.columnProfiles as column}
+						<article class="column-preview-card">
+							<div>
+								<strong>{column.name}</strong>
+								<span>{column.type}</span>
+							</div>
+							{#if column.sampleValues.length > 0}
+								<ol>
+									{#each column.sampleValues as value}
+										<li>{value}</li>
+									{/each}
+								</ol>
+							{:else}
+								<p>No non-empty values in scanned rows.</p>
+							{/if}
+						</article>
+					{/each}
+				</div>
+			</section>
+		{/if}
 
 		<section class="chart-grid">
 			{#each dashboard.charts as chart}
@@ -809,6 +944,18 @@
 		line-height: 1.5;
 	}
 
+	.dashboard-note {
+		margin: 1rem 0 0;
+	}
+
+	.warning-note {
+		padding: 0.85rem 1rem;
+		border-radius: 0.9rem;
+		background: rgba(255, 196, 87, 0.1);
+		border: 1px solid rgba(255, 196, 87, 0.22);
+		color: #ffe0a3;
+	}
+
 	.manager-divider {
 		height: 1px;
 		margin: 1.2rem 0;
@@ -950,6 +1097,43 @@
 		overflow-wrap: anywhere;
 	}
 
+	.progress-panel {
+		margin-top: 1rem;
+		padding: 1rem;
+		border-radius: 1rem;
+		background: rgba(110, 168, 254, 0.08);
+		border: 1px solid rgba(110, 168, 254, 0.18);
+		display: grid;
+		gap: 0.8rem;
+	}
+
+	.progress-copy {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+		color: #cddcff;
+		flex-wrap: wrap;
+	}
+
+	.progress-copy span {
+		color: #8fb2ff;
+	}
+
+	.progress-track {
+		height: 0.55rem;
+		overflow: hidden;
+		border-radius: 999px;
+		background: rgba(255, 255, 255, 0.08);
+	}
+
+	.progress-fill {
+		height: 100%;
+		min-width: 0.35rem;
+		border-radius: inherit;
+		background: linear-gradient(90deg, #6ea8fe, #58d68d);
+		transition: width 180ms ease;
+	}
+
 	.message {
 		padding: 0.95rem 1.1rem;
 		border-radius: 1rem;
@@ -979,6 +1163,68 @@
 
 	.summary-card {
 		padding: 1rem;
+	}
+
+	.preview-panel {
+		padding: 1.25rem;
+	}
+
+	.preview-count {
+		color: #8fb2ff;
+		font-weight: 700;
+	}
+
+	.column-preview-grid {
+		display: grid;
+		gap: 0.85rem;
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+		max-height: 520px;
+		overflow: auto;
+		padding-right: 0.25rem;
+	}
+
+	.column-preview-card {
+		padding: 0.95rem;
+		border-radius: 1rem;
+		background: rgba(255, 255, 255, 0.04);
+		border: 1px solid rgba(255, 255, 255, 0.06);
+		display: grid;
+		gap: 0.75rem;
+	}
+
+	.column-preview-card div {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+	}
+
+	.column-preview-card span {
+		padding: 0.2rem 0.55rem;
+		border-radius: 999px;
+		background: rgba(141, 92, 246, 0.16);
+		color: #d8ccff;
+		font-size: 0.72rem;
+		font-weight: 700;
+	}
+
+	.column-preview-card ol {
+		margin: 0;
+		padding-left: 1.35rem;
+		display: grid;
+		gap: 0.35rem;
+		color: #dfe7ff;
+		font-size: 0.86rem;
+	}
+
+	.column-preview-card li,
+	.column-preview-card p {
+		overflow-wrap: anywhere;
+	}
+
+	.column-preview-card p {
+		margin: 0;
+		color: #8b94b4;
 	}
 
 	.chart-grid {
