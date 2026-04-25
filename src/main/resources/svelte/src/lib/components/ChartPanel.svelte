@@ -1,230 +1,95 @@
 <script lang="ts">
-	import embed from 'vega-embed';
-	import type { VisualizationSpec } from 'vega-embed';
-	import { changeset, type View } from 'vega';
 	import type { DashboardChart, DashboardPoint, DashboardSeries } from '$lib/types';
 
-	let { chart } = $props<{ chart: DashboardChart }>();
+	let { chart, mode } = $props<{ chart: DashboardChart; mode?: DashboardChart['type'] }>();
 
-	let chartHost = $state<HTMLDivElement | null>(null);
-	let view: View | null = null;
-	let viewReady = $state(0);
-	let renderMode = $derived(chart.type);
-	let showLegend = $derived(chart.series.length > 1);
 	let latestChart = $state<DashboardChart | null>(null);
+	let renderMode = $derived(mode ?? chart.type);
 	let currentChart = $derived(latestChart ?? chart);
-	let hasRenderableData = $derived(chartHasData(currentChart));
+	let chartLabels = $derived(labels(currentChart));
+	let chartData = $derived(toChartData(currentChart));
+	let hasRenderableData = $derived(currentChart.series.length > 0 && chartLabels.length > 0);
+	let maxValue = $derived(Math.max(1, ...chartData.map((point) => point.value)));
 
 	const width = 640;
 	const height = 280;
+	const padding = { top: 18, right: 24, bottom: 48, left: 52 };
+	const plotWidth = width - padding.left - padding.right;
+	const plotHeight = height - padding.top - padding.bottom;
 	const palette = ['#6ea8fe', '#58d68d', '#f7b267', '#ff7b7b', '#c084fc'];
 
-	type VegaDatum = {
-		label: string;
-		value: number;
+	type ChartDatum = DashboardPoint & {
 		series: string;
+		seriesIndex: number;
+		labelIndex: number;
 	};
 
-	function labels(input = chart): string[] {
+	function labels(input: DashboardChart): string[] {
 		return Array.from(
 			new Set(input.series.flatMap((series: DashboardSeries) => series.points.map((point: DashboardPoint) => point.label)))
 		);
 	}
 
-	function toVegaData(input = chart): VegaDatum[] {
-		return input.series.flatMap((series: DashboardSeries) =>
-			series.points.map((point: DashboardPoint) => ({
-				label: point.label,
-				value: point.value,
-				series: series.name
+	function toChartData(input: DashboardChart): ChartDatum[] {
+		const allLabels = labels(input);
+		return input.series.flatMap((series, seriesIndex) =>
+			series.points.map((point) => ({
+				...point,
+				series: series.name,
+				seriesIndex,
+				labelIndex: allLabels.indexOf(point.label)
 			}))
 		);
 	}
 
-	function chartHasData(input: DashboardChart): boolean {
-		return input.series.length > 0 && labels(input).length > 0;
-	}
-
 	function tableRows(): string[][] {
-		const tableChart = currentChart;
-		const allLabels = labels(tableChart);
-		if (tableChart.series.length <= 1) {
-			const firstSeries = tableChart.series[0];
+		if (currentChart.series.length <= 1) {
+			const firstSeries = currentChart.series[0];
 			return firstSeries ? firstSeries.points.map((point: DashboardPoint) => [point.label, String(point.value)]) : [];
 		}
 
-		return allLabels.map((label: string) => [
+		return chartLabels.map((label) => [
 			label,
-			...tableChart.series.map((series: DashboardSeries) => String(series.points.find((point) => point.label === label)?.value ?? 0))
+			...currentChart.series.map((series: DashboardSeries) => String(series.points.find((point: DashboardPoint) => point.label === label)?.value ?? 0))
 		]);
 	}
 
-	function vegaSpec(mode: string, includeLegend: boolean): VisualizationSpec {
-		if (mode === 'LINE') {
-			return {
-				$schema: 'https://vega.github.io/schema/vega/v5.json',
-				background: 'transparent',
-				width,
-				height,
-				padding: { top: 8, right: 20, bottom: 46, left: 48 },
-				data: [{ name: 'table', values: [] }],
-				scales: [
-					{ name: 'x', type: 'point', domain: { data: 'table', field: 'label' }, range: 'width', padding: 0.5 },
-					{ name: 'y', type: 'linear', domain: { data: 'table', field: 'value' }, nice: true, zero: true, range: 'height' },
-					{ name: 'color', type: 'ordinal', domain: { data: 'table', field: 'series' }, range: palette }
-				],
-				axes: [
-					{ orient: 'bottom', scale: 'x', labelColor: '#8b94b4', domainColor: 'rgba(255,255,255,0.14)', tickColor: 'rgba(255,255,255,0.14)' },
-					{ orient: 'left', scale: 'y', labelColor: '#8b94b4', gridColor: 'rgba(255,255,255,0.08)', domain: false, tickColor: 'rgba(255,255,255,0.14)' }
-				],
-				legends: includeLegend ? [{ fill: 'color', orient: 'top', labelColor: '#8b94b4' }] : [],
-				marks: [
-					{
-						type: 'group',
-						from: { facet: { name: 'seriesFacet', data: 'table', groupby: 'series' } },
-						marks: [
-							{
-								type: 'line',
-								from: { data: 'seriesFacet' },
-								encode: {
-									update: {
-										x: { scale: 'x', field: 'label' },
-										y: { scale: 'y', field: 'value' },
-										stroke: { scale: 'color', field: 'series' },
-										strokeWidth: { value: 3 }
-									}
-								}
-							},
-							{
-								type: 'symbol',
-								from: { data: 'seriesFacet' },
-								encode: {
-									update: {
-										x: { scale: 'x', field: 'label' },
-										y: { scale: 'y', field: 'value' },
-										size: { value: 64 },
-										fill: { scale: 'color', field: 'series' }
-									}
-								}
-							}
-						]
-					}
-				]
-			};
+	function xForLabel(labelIndex: number): number {
+		if (chartLabels.length <= 1) {
+			return padding.left + plotWidth / 2;
 		}
-
-		return {
-			$schema: 'https://vega.github.io/schema/vega/v5.json',
-			background: 'transparent',
-			width,
-			height,
-			padding: { top: 8, right: 20, bottom: 46, left: 48 },
-			data: [{ name: 'table', values: [] }],
-			scales: [
-				{ name: 'x', type: 'band', domain: { data: 'table', field: 'label' }, range: 'width', paddingInner: 0.2, paddingOuter: 0.08 },
-				{ name: 'y', type: 'linear', domain: { data: 'table', field: 'value' }, nice: true, zero: true, range: 'height' },
-				{ name: 'color', type: 'ordinal', domain: { data: 'table', field: 'series' }, range: palette }
-			],
-			axes: [
-				{ orient: 'bottom', scale: 'x', labelColor: '#8b94b4', domainColor: 'rgba(255,255,255,0.14)', tickColor: 'rgba(255,255,255,0.14)' },
-				{ orient: 'left', scale: 'y', labelColor: '#8b94b4', gridColor: 'rgba(255,255,255,0.08)', domain: false, tickColor: 'rgba(255,255,255,0.14)' }
-			],
-			legends: includeLegend ? [{ fill: 'color', orient: 'top', labelColor: '#8b94b4' }] : [],
-			marks: [
-				{
-					type: 'group',
-					from: { facet: { name: 'labelFacet', data: 'table', groupby: 'label' } },
-					encode: {
-						update: {
-							x: { scale: 'x', field: 'label' },
-							width: { scale: 'x', band: 1 }
-						}
-					},
-					scales: [
-						{ name: 'series', type: 'band', domain: { data: 'labelFacet', field: 'series' }, range: 'width', padding: 0.14 }
-					],
-					marks: [
-						{
-							type: 'rect',
-							from: { data: 'labelFacet' },
-							encode: {
-								update: {
-									x: { scale: 'series', field: 'series' },
-									width: { scale: 'series', band: 1 },
-									y: { scale: 'y', field: 'value' },
-									y2: { scale: 'y', value: 0 },
-									fill: { scale: 'color', field: 'series' },
-									cornerRadiusTopLeft: { value: 4 },
-									cornerRadiusTopRight: { value: 4 }
-								}
-							}
-						}
-					]
-				}
-			]
-		};
+		return padding.left + (labelIndex / (chartLabels.length - 1)) * plotWidth;
 	}
 
-	function updateVegaData(input = chart) {
-		if (!view) {
-			return;
-		}
-
-		void view
-			.change('table', changeset().remove(() => true).insert(toVegaData(input)))
-			.runAsync()
-			.catch(() => {
-				if (chartHost) {
-					chartHost.innerHTML = '<div class="empty-chart">Unable to update chart.</div>';
-				}
-			});
+	function yForValue(value: number): number {
+		return padding.top + plotHeight - (value / maxValue) * plotHeight;
 	}
 
-	$effect(() => {
-		const host = chartHost;
-		const mode = renderMode;
-		const includeLegend = showLegend;
+	function barX(point: ChartDatum): number {
+		const labelBand = plotWidth / Math.max(1, chartLabels.length);
+		const seriesCount = Math.max(1, currentChart.series.length);
+		const barWidth = labelBand / seriesCount;
+		return padding.left + point.labelIndex * labelBand + point.seriesIndex * barWidth + barWidth * 0.12;
+	}
 
-		if (!host || mode === 'TABLE') {
-			view?.finalize();
-			view = null;
-			return;
+	function barWidth(): number {
+		const labelBand = plotWidth / Math.max(1, chartLabels.length);
+		return Math.max(2, (labelBand / Math.max(1, currentChart.series.length)) * 0.76);
+	}
+
+	function linePoints(series: DashboardSeries): string {
+		return series.points
+			.map((point) => `${xForLabel(chartLabels.indexOf(point.label))},${yForValue(point.value)}`)
+			.join(' ');
+	}
+
+	function visibleLabels(): string[] {
+		if (chartLabels.length <= 10) {
+			return chartLabels;
 		}
-
-		let disposed = false;
-		view?.finalize();
-		view = null;
-		viewReady += 1;
-		host.innerHTML = '';
-
-		void embed(host, vegaSpec(mode, includeLegend), {
-			actions: false,
-			renderer: 'canvas',
-			theme: 'dark'
-		})
-			.then((result) => {
-				if (disposed) {
-					void result.finalize();
-					return;
-				}
-				view = result.view;
-				viewReady += 1;
-			})
-			.catch(() => {
-				if (host) {
-					host.innerHTML = '<div class="empty-chart">Unable to render chart.</div>';
-				}
-			});
-
-		return () => {
-			disposed = true;
-			view?.finalize();
-			view = null;
-			if (host) {
-				host.innerHTML = '';
-			}
-		};
-	});
+		const step = Math.ceil(chartLabels.length / 10);
+		return chartLabels.filter((_, index) => index % step === 0);
+	}
 
 	$effect(() => {
 		function handleChartUpdate(event: Event) {
@@ -232,12 +97,9 @@
 				return;
 			}
 			const updatedChart = (event.detail as DashboardChart[]).find((entry) => entry.id === chart.id);
-			if (!updatedChart) {
-				return;
+			if (updatedChart) {
+				latestChart = updatedChart;
 			}
-			const nextChart = { ...updatedChart, type: chart.type };
-			latestChart = nextChart;
-			updateVegaData(nextChart);
 		}
 
 		window.addEventListener('dashboard-charts:update', handleChartUpdate);
@@ -245,21 +107,8 @@
 	});
 
 	$effect(() => {
-		const baseChart = chart;
+		chart;
 		latestChart = null;
-		if (baseChart.type === 'TABLE' || !chartHasData(baseChart)) {
-			return;
-		}
-		updateVegaData(baseChart);
-	});
-
-	$effect(() => {
-		viewReady;
-		const visibleChart = currentChart;
-		if (visibleChart.type === 'TABLE' || !chartHasData(visibleChart)) {
-			return;
-		}
-		updateVegaData(visibleChart);
 	});
 </script>
 
@@ -268,7 +117,7 @@
 		<h3>{chart.title}</h3>
 	</div>
 
-	{#if chart.type === 'TABLE'}
+	{#if renderMode === 'TABLE'}
 		{#if !hasRenderableData}
 			<div class="empty-chart">No chart data available.</div>
 		{:else}
@@ -299,11 +148,37 @@
 				</table>
 			</div>
 		{/if}
+	{:else if !hasRenderableData}
+		<div class="empty-chart">No chart data available.</div>
 	{:else}
-		{#if !hasRenderableData}
-			<div class="empty-chart overlay-empty">No chart data available.</div>
-		{/if}
-		<div bind:this={chartHost} class="vega-host" class:hidden-chart={!hasRenderableData}></div>
+		<svg class="chart-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={chart.title}>
+			<line class="axis" x1={padding.left} y1={padding.top + plotHeight} x2={padding.left + plotWidth} y2={padding.top + plotHeight} />
+			<line class="axis" x1={padding.left} y1={padding.top} x2={padding.left} y2={padding.top + plotHeight} />
+
+			{#if renderMode === 'LINE'}
+				{#each currentChart.series as series, seriesIndex}
+					<polyline class="line-series" points={linePoints(series)} stroke={palette[seriesIndex % palette.length]} />
+					{#each series.points as point}
+						<circle cx={xForLabel(chartLabels.indexOf(point.label))} cy={yForValue(point.value)} r="3" fill={palette[seriesIndex % palette.length]} />
+					{/each}
+				{/each}
+			{:else}
+				{#each chartData as point}
+					<rect
+						x={barX(point)}
+						y={yForValue(point.value)}
+						width={barWidth()}
+						height={padding.top + plotHeight - yForValue(point.value)}
+						fill={palette[point.seriesIndex % palette.length]}
+						rx="3"
+					/>
+				{/each}
+			{/if}
+
+			{#each visibleLabels() as label}
+				<text class="axis-label" x={xForLabel(chartLabels.indexOf(label))} y={height - 14} text-anchor="middle">{label}</text>
+			{/each}
+		</svg>
 	{/if}
 </div>
 
@@ -326,23 +201,27 @@
 		font-weight: 600;
 	}
 
-	:global(.vega-host .vega-actions) {
-		display: none;
-	}
-
-	:global(.vega-host svg) {
+	.chart-svg {
 		width: 100%;
-		height: auto;
+		min-height: 280px;
 		overflow: visible;
 	}
 
-	:global(.vega-host canvas) {
-		max-width: 100%;
-		height: auto;
+	.axis {
+		stroke: rgba(255, 255, 255, 0.18);
+		stroke-width: 1;
 	}
 
-	.hidden-chart {
-		display: none;
+	.axis-label {
+		fill: #8b94b4;
+		font-size: 10px;
+	}
+
+	.line-series {
+		fill: none;
+		stroke-width: 3;
+		stroke-linejoin: round;
+		stroke-linecap: round;
 	}
 
 	.empty-chart {

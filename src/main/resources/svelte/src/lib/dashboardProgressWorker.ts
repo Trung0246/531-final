@@ -5,6 +5,7 @@ type WorkerCommand =
 	| { type: 'close' };
 
 type WorkerUpdate =
+	| { type: 'summary'; progress: DashboardProgressEvent }
 	| { type: 'progress'; progress: DashboardProgressEvent }
 	| { type: 'error'; message: string }
 	| { type: 'closed' };
@@ -18,6 +19,14 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null;
 function post(update: WorkerUpdate) {
 	self.postMessage(update);
 }
+
+function toSummary(progress: DashboardProgressEvent): DashboardProgressEvent {
+	return {
+		...progress,
+		charts: [],
+		dashboard: null
+	};
+	}
 
 function clearFlushTimer() {
 	if (flushTimer) {
@@ -36,6 +45,10 @@ function flushLatest() {
 }
 
 function scheduleFlush(progress: DashboardProgressEvent) {
+	post({ type: 'summary', progress: toSummary(progress) });
+	if (!progress.charts?.length && !progress.dashboard && !progress.complete) {
+		return;
+	}
 	latestProgress = progress;
 	if (progress.complete) {
 		flushLatest();

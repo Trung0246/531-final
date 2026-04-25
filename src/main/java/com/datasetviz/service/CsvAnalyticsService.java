@@ -234,9 +234,10 @@ public class CsvAnalyticsService {
             while (iterator.hasNext()) {
                 mutableAnalytics.acceptRecord(schema, new TabularRecord(iterator.next()));
                 currentFile.processedRows++;
-                if (mutableAnalytics.getProcessedRows() % updateEveryRows == 0) {
-                    boolean includeDashboard = mutableAnalytics.getProcessedRows() % fullDashboardUpdateEveryRows == 0;
-                    publishProgress(datasetId, dataset, "processing", "Processed " + currentFile.processedRows + " rows from " + fileName(filePath), mutableAnalytics, totalFiles, fileProgress, false, true, includeDashboard);
+                boolean includeCharts = mutableAnalytics.getProcessedRows() % updateEveryRows == 0;
+                boolean includeDashboard = mutableAnalytics.getProcessedRows() % fullDashboardUpdateEveryRows == 0;
+                if (includeCharts || includeDashboard) {
+                    publishProgress(datasetId, dataset, "processing", "Processed " + currentFile.processedRows + " rows from " + fileName(filePath), mutableAnalytics, totalFiles, fileProgress, false, includeCharts || includeDashboard, includeDashboard);
                 }
             }
         }

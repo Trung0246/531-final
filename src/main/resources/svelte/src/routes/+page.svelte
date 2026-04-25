@@ -118,7 +118,7 @@
 	let progressProcessedRows = $state(0);
 	let progressFailedFiles = $state(0);
 	let progressFiles = $state<DashboardProgressEvent['files']>([]);
-	let progressWorker = $state<Worker | null>(null);
+	let progressSocket: WebSocket | null = null;
 	let lastChartShellUpdate = 0;
 	let form = $state<RegisterDatasetInput>({
 		name: '',
@@ -164,6 +164,28 @@
 		progressFiles = progress.files;
 	}
 
+	function visibleSummaryItems() {
+		if (!dashboard) {
+			return [];
+		}
+		if (!dashboardProgress) {
+			return dashboard.summaryItems;
+		}
+
+		return dashboard.summaryItems.map((item) => {
+			if (item.label === 'Scanned files') {
+				return { ...item, value: String(progressScannedFiles) };
+			}
+			if (item.label === 'Processed rows') {
+				return { ...item, value: String(progressProcessedRows) };
+			}
+			if (item.label === 'Failed files') {
+				return { ...item, value: String(progressFailedFiles) };
+			}
+			return item;
+		});
+	}
+
 	function clearProgressSummary() {
 		progressMessage = '';
 		progressScannedFiles = 0;
@@ -171,6 +193,12 @@
 		progressProcessedRows = 0;
 		progressFailedFiles = 0;
 		progressFiles = [];
+	}
+
+	function summaryInt(label: string): number {
+		const rawValue = dashboard?.summaryItems.find((item) => item.label === label)?.value ?? '';
+		const parsedValue = Number.parseInt(rawValue.replaceAll(',', ''), 10);
+		return Number.isFinite(parsedValue) ? parsedValue : 0;
 	}
 
 	function updateDashboardChartShell(charts: DashboardChart[], force = false) {
@@ -195,63 +223,68 @@
 	}
 
 	function closeProgressSocket() {
-		progressWorker?.postMessage({ type: 'close' });
-		progressWorker?.terminate();
-		progressWorker = null;
+		if (progressSocket) {
+			progressSocket.onclose = null;
+			progressSocket.onerror = null;
+			progressSocket.onmessage = null;
+			progressSocket.close();
+			progressSocket = null;
+		}
+	}
+
+	function handleProgress(progress: DashboardProgressEvent) {
+		if (progress.stage === 'connected') {
+			return;
+		}
+
+		applyProgressSummary(progress);
+		dashboardProgress = { ...progress, charts: [], dashboard: null };
+
+		if (progress.dashboard) {
+			dashboard = progress.dashboard;
+			lastChartShellUpdate = performance.now();
+		} else if (!dashboard && progress.charts?.length && selectedDataset) {
+			dashboard = {
+				datasetId: selectedDataset.id,
+				datasetName: selectedDataset.name,
+				datasetType: selectedDataset.datasetType,
+				hdfsPath: selectedDataset.hdfsPath,
+				generatedAt: new Date().toISOString(),
+				maxFiles,
+				summaryItems: [],
+				charts: progress.charts,
+				columnProfiles: [],
+				listPanel: null,
+				tablePanel: null
+			};
+			lastChartShellUpdate = performance.now();
+		} else if (progress.charts?.length) {
+			updateDashboardChartShell(progress.charts, progress.complete);
+		}
+
+		if (progress.charts?.length) {
+			requestAnimationFrame(() => {
+				window.dispatchEvent(new CustomEvent<DashboardChart[]>('dashboard-charts:update', { detail: progress.charts }));
+			});
+		}
+
+		setMessage(progress.message, progress.complete ? 'success' : 'info');
 	}
 
 	function openProgressSocket(datasetId: string) {
 		closeProgressSocket();
 		const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 		const url = `${protocol}//${window.location.host}/ws/dashboard-progress?datasetId=${encodeURIComponent(datasetId)}`;
-		const worker = new Worker(new URL('../lib/dashboardProgressWorker.ts', import.meta.url), { type: 'module' });
-		progressWorker = worker;
-
-		worker.onmessage = (event: MessageEvent<{ type: string; progress?: DashboardProgressEvent; message?: string }>) => {
-			if (event.data.type === 'progress' && event.data.progress) {
-				const progress = event.data.progress;
-				if (progress.stage === 'connected') {
-					return;
-				}
-				applyProgressSummary(progress);
-				dashboardProgress = { ...progress, charts: [], dashboard: null };
-				if (progress.dashboard) {
-					dashboard = progress.dashboard;
-					lastChartShellUpdate = performance.now();
-				} else if (!dashboard && progress.charts?.length && selectedDataset) {
-					dashboard = {
-						datasetId: selectedDataset.id,
-						datasetName: selectedDataset.name,
-						datasetType: selectedDataset.datasetType,
-						hdfsPath: selectedDataset.hdfsPath,
-						generatedAt: new Date().toISOString(),
-						maxFiles,
-						summaryItems: [],
-						charts: progress.charts,
-						columnProfiles: [],
-						listPanel: null,
-						tablePanel: null
-					};
-					lastChartShellUpdate = performance.now();
-				} else if (progress.charts?.length) {
-					updateDashboardChartShell(progress.charts, progress.complete);
-				}
-				if (progress.charts?.length) {
-					requestAnimationFrame(() => {
-						window.dispatchEvent(new CustomEvent<DashboardChart[]>('dashboard-charts:update', { detail: progress.charts }));
-					});
-				}
-				if (!progress.complete) {
-					setMessage(progress.message, 'info');
-				}
-				return;
-			}
-			if (event.data.type === 'error') {
-				setMessage(event.data.message ?? 'Live dashboard progress is unavailable; the dashboard request is still running.', 'info');
+		const socket = new WebSocket(url);
+		progressSocket = socket;
+		socket.onmessage = (event) => {
+			try {
+				handleProgress(JSON.parse(event.data) as DashboardProgressEvent);
+			} catch {
+				// Ignore non-JSON control frames.
 			}
 		};
-
-		worker.postMessage({ type: 'connect', url });
+		socket.onerror = () => setMessage('Live dashboard progress is unavailable; the dashboard request is still running.', 'info');
 	}
 
 	async function restRequest<T>(url: string, init: RequestInit = {}): Promise<T> {
@@ -432,6 +465,14 @@
 				refresh
 			});
 			dashboard = data.dashboard;
+			progressMessage = 'Dashboard analytics ready.';
+			progressScannedFiles = summaryInt('Scanned files');
+			progressProcessedRows = summaryInt('Processed rows');
+			progressFailedFiles = summaryInt('Failed files');
+			const currentProgress = dashboardProgress;
+			if (currentProgress) {
+				dashboardProgress = Object.assign({}, currentProgress, { message: progressMessage, complete: true });
+			}
 			chartTypeOverrides = {};
 			chartFocusOverrides = {};
 			setMessage(`Loaded ${data.dashboard.datasetName}.`, 'success');
@@ -823,7 +864,7 @@
 
 	{#if dashboard}
 		<section class="summary-grid">
-			{#each dashboard.summaryItems as item}
+			{#each visibleSummaryItems() as item}
 				<article class="summary-card panel">
 					<span class="meta-label">{item.label}</span>
 					<strong>{item.value}</strong>
@@ -863,7 +904,7 @@
 		{/if}
 
 		<section class="chart-grid">
-			{#each dashboard.charts as chart (chart.id)}
+			{#each dashboard.charts as chart (`${chart.id}:${chartTypeOverrides[chart.id] ?? chart.type}`)}
 				{@const focusValues = selectableValues(chart)}
 				{@const displayChart = resolvedChart(chart)}
 				<article class="panel chart-card">
@@ -894,7 +935,9 @@
 							</div>
 						{/if}
 					</div>
-					<ChartPanel chart={displayChart} />
+					{#key displayChart.type}
+						<ChartPanel chart={displayChart} mode={displayChart.type} />
+					{/key}
 				</article>
 			{/each}
 		</section>

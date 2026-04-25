@@ -18,7 +18,6 @@ public class DashboardProgressService {
     private final ObjectMapper objectMapper;
     private final ConcurrentMap<String, Set<WebSocketSession>> sessionsByDataset = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, DashboardProgressEvent> latestEventByDataset = new ConcurrentHashMap<>();
-    private final ConcurrentMap<String, DashboardProgressEvent> latestDashboardEventByDataset = new ConcurrentHashMap<>();
 
     public DashboardProgressService() {
         this(new ObjectMapper());
@@ -31,10 +30,9 @@ public class DashboardProgressService {
     public void subscribe(String datasetId, WebSocketSession session) {
         sessionsByDataset.computeIfAbsent(datasetId, ignored -> ConcurrentHashMap.newKeySet()).add(session);
         DashboardProgressEvent latestEvent = latestEventByDataset.get(datasetId);
-        DashboardProgressEvent latestDashboardEvent = latestDashboardEventByDataset.get(datasetId);
         publishToSession(session, latestEvent == null
                 ? new DashboardProgressEvent(datasetId, "connected", "Live dashboard progress connected.", 0, 0, 0, 0, List.of(), List.of(), null, false)
-                : withReplayDashboard(latestEvent, latestDashboardEvent));
+                : lightweightReplay(latestEvent));
     }
 
     public void unsubscribe(WebSocketSession session) {
@@ -43,9 +41,6 @@ public class DashboardProgressService {
 
     public void publish(DashboardProgressEvent event) {
         latestEventByDataset.put(event.datasetId(), event);
-        if (event.dashboard() != null) {
-            latestDashboardEventByDataset.put(event.datasetId(), event);
-        }
         Set<WebSocketSession> sessions = sessionsByDataset.get(event.datasetId());
         if (sessions == null || sessions.isEmpty()) {
             return;
@@ -69,21 +64,18 @@ public class DashboardProgressService {
         }
     }
 
-    private DashboardProgressEvent withReplayDashboard(DashboardProgressEvent event, DashboardProgressEvent dashboardEvent) {
-        if (event.dashboard() != null || dashboardEvent == null || dashboardEvent.dashboard() == null) {
-            return event;
-        }
+    private DashboardProgressEvent lightweightReplay(DashboardProgressEvent event) {
         return new DashboardProgressEvent(
                 event.datasetId(),
-                event.stage(),
-                event.message(),
+                event.complete() ? event.stage() : "replay",
+                event.complete() ? event.message() : "Last known dashboard progress. Waiting for live updates...",
                 event.scannedFiles(),
                 event.totalFiles(),
                 event.processedRows(),
                 event.failedFiles(),
                 event.files(),
-                event.charts(),
-                dashboardEvent.dashboard(),
+                List.of(),
+                null,
                 event.complete()
         );
     }
