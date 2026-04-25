@@ -28,8 +28,8 @@
 	`;
 
 	const DASHBOARD_QUERY = `
-		query Dashboard($datasetId: ID!, $maxFiles: Int, $refresh: Boolean!) {
-			dashboard(datasetId: $datasetId, maxFiles: $maxFiles, refresh: $refresh) {
+		query Dashboard($datasetId: ID!, $maxFiles: Int, $refresh: Boolean!, $updateEveryRows: Int) {
+			dashboard(datasetId: $datasetId, maxFiles: $maxFiles, refresh: $refresh, updateEveryRows: $updateEveryRows) {
 				datasetId
 				datasetName
 				datasetType
@@ -96,6 +96,7 @@
 	let chartFocusOverrides = $state<Record<string, string[]>>({});
 	let selectedDatasetId = $state('');
 	let maxFiles = $state(5000);
+	let updateEveryRows = $state(25000);
 	let refresh = $state(false);
 	let isRegistering = $state(false);
 	let isImporting = $state(false);
@@ -105,7 +106,7 @@
 	let isLoadingDatasets = $state(false);
 	let message = $state<MessageState>({ text: '', type: 'info' });
 	let dashboardProgress = $state<DashboardProgressEvent | null>(null);
-	let progressSocket = $state<WebSocket | null>(null);
+	let progressWorker = $state<Worker | null>(null);
 	let form = $state<RegisterDatasetInput>({
 		name: '',
 	description: '',
@@ -136,19 +137,21 @@
 	}
 
 	function closeProgressSocket() {
-		progressSocket?.close();
-		progressSocket = null;
+		progressWorker?.postMessage({ type: 'close' });
+		progressWorker?.terminate();
+		progressWorker = null;
 	}
 
 	function openProgressSocket(datasetId: string) {
 		closeProgressSocket();
 		const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-		const socket = new WebSocket(`${protocol}//${window.location.host}/ws/dashboard-progress?datasetId=${encodeURIComponent(datasetId)}`);
-		progressSocket = socket;
+		const url = `${protocol}//${window.location.host}/ws/dashboard-progress?datasetId=${encodeURIComponent(datasetId)}`;
+		const worker = new Worker(new URL('../lib/dashboardProgressWorker.ts', import.meta.url), { type: 'module' });
+		progressWorker = worker;
 
-		socket.onmessage = (event) => {
-			try {
-				const progress = JSON.parse(event.data) as DashboardProgressEvent;
+		worker.onmessage = (event: MessageEvent<{ type: string; progress?: DashboardProgressEvent; message?: string }>) => {
+			if (event.data.type === 'progress' && event.data.progress) {
+				const progress = event.data.progress;
 				dashboardProgress = progress;
 				if (progress.dashboard) {
 					dashboard = progress.dashboard;
@@ -156,14 +159,14 @@
 				if (!progress.complete) {
 					setMessage(progress.message, 'info');
 				}
-			} catch {
-				// Ignore non-JSON ping/pong frames from the raw progress channel.
+				return;
+			}
+			if (event.data.type === 'error') {
+				setMessage(event.data.message ?? 'Live dashboard progress is unavailable; the dashboard request is still running.', 'info');
 			}
 		};
 
-		socket.onerror = () => {
-			setMessage('Live dashboard progress is unavailable; the dashboard request is still running.', 'info');
-		};
+		worker.postMessage({ type: 'connect', url });
 	}
 
 	async function restRequest<T>(url: string, init: RequestInit = {}): Promise<T> {
@@ -321,6 +324,7 @@
 			const data = await graphqlRequest<{ dashboard: DashboardView }>(DASHBOARD_QUERY, {
 				datasetId: selectedDatasetId,
 				maxFiles,
+				updateEveryRows,
 				refresh
 			});
 			dashboard = data.dashboard;
@@ -647,6 +651,10 @@
 					<span>Max files</span>
 					<input bind:value={maxFiles} type="number" min="1" />
 				</label>
+				<label>
+					<span>Update every rows</span>
+					<input bind:value={updateEveryRows} type="number" min="50" step="50" />
+				</label>
 				<label class="checkbox-field">
 					<input bind:checked={refresh} type="checkbox" />
 					<span>Force refresh</span>
@@ -654,7 +662,7 @@
 			</div>
 
 			<div class="flow-note dashboard-note">
-				Large CSV files stream row-by-row on the backend. The WebSocket channel updates file state and partial dashboard results while GraphQL returns the final snapshot.
+				Max files limits how many files are scanned. Update every rows controls lightweight row/file progress; charts refresh every 5,000 rows or at file boundaries to keep the UI responsive.
 			</div>
 			{#if !selectedDatasetSupportsDashboard}
 				<div class="flow-note dashboard-note warning-note">

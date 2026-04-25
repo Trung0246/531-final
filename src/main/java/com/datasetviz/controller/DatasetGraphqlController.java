@@ -44,10 +44,11 @@ public class DatasetGraphqlController {
 
     @QueryMapping
     public DashboardView dashboard(@Argument String datasetId,
-                                   @Argument Integer maxFiles,
-                                   @Argument Boolean refresh) throws IOException {
+                                    @Argument Integer maxFiles,
+                                    @Argument Integer updateEveryRows,
+                                    @Argument Boolean refresh) throws IOException {
         return dashboardViewService.toDashboardView(
-                datasetAnalyticsService.analyze(UUID.fromString(datasetId), maxFiles, Boolean.TRUE.equals(refresh))
+                datasetAnalyticsService.analyze(UUID.fromString(datasetId), maxFiles, updateEveryRows, Boolean.TRUE.equals(refresh))
         );
     }
 

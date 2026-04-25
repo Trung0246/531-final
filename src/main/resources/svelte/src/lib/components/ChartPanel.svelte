@@ -1,11 +1,16 @@
 <script lang="ts">
 	import embed from 'vega-embed';
 	import type { VisualizationSpec } from 'vega-embed';
+	import { changeset, type View } from 'vega';
 	import type { DashboardChart, DashboardPoint, DashboardSeries } from '$lib/types';
 
 	let { chart } = $props<{ chart: DashboardChart }>();
 
 	let chartHost = $state<HTMLDivElement | null>(null);
+	let view: View | null = null;
+	let viewReady = $state(0);
+	let renderMode = $derived(chart.type);
+	let showLegend = $derived(chart.series.length > 1);
 
 	const width = 640;
 	const height = 280;
@@ -46,17 +51,15 @@
 		]);
 	}
 
-	function vegaSpec(): VisualizationSpec {
-		const values = toVegaData();
-
-		if (chart.type === 'LINE') {
+	function vegaSpec(mode: string, includeLegend: boolean): VisualizationSpec {
+		if (mode === 'LINE') {
 			return {
 				$schema: 'https://vega.github.io/schema/vega/v5.json',
 				background: 'transparent',
 				width,
 				height,
 				padding: { top: 8, right: 20, bottom: 46, left: 48 },
-				data: [{ name: 'table', values }],
+				data: [{ name: 'table', values: [] }],
 				scales: [
 					{ name: 'x', type: 'point', domain: { data: 'table', field: 'label' }, range: 'width', padding: 0.5 },
 					{ name: 'y', type: 'linear', domain: { data: 'table', field: 'value' }, nice: true, zero: true, range: 'height' },
@@ -66,7 +69,7 @@
 					{ orient: 'bottom', scale: 'x', labelColor: '#8b94b4', domainColor: 'rgba(255,255,255,0.14)', tickColor: 'rgba(255,255,255,0.14)' },
 					{ orient: 'left', scale: 'y', labelColor: '#8b94b4', gridColor: 'rgba(255,255,255,0.08)', domain: false, tickColor: 'rgba(255,255,255,0.14)' }
 				],
-				legends: chart.series.length > 1 ? [{ fill: 'color', orient: 'top', labelColor: '#8b94b4' }] : [],
+				legends: includeLegend ? [{ fill: 'color', orient: 'top', labelColor: '#8b94b4' }] : [],
 				marks: [
 					{
 						type: 'group',
@@ -108,7 +111,7 @@
 			width,
 			height,
 			padding: { top: 8, right: 20, bottom: 46, left: 48 },
-			data: [{ name: 'table', values }],
+			data: [{ name: 'table', values: [] }],
 			scales: [
 				{ name: 'x', type: 'band', domain: { data: 'table', field: 'label' }, range: 'width', paddingInner: 0.2, paddingOuter: 0.08 },
 				{ name: 'y', type: 'linear', domain: { data: 'table', field: 'value' }, nice: true, zero: true, range: 'height' },
@@ -118,7 +121,7 @@
 				{ orient: 'bottom', scale: 'x', labelColor: '#8b94b4', domainColor: 'rgba(255,255,255,0.14)', tickColor: 'rgba(255,255,255,0.14)' },
 				{ orient: 'left', scale: 'y', labelColor: '#8b94b4', gridColor: 'rgba(255,255,255,0.08)', domain: false, tickColor: 'rgba(255,255,255,0.14)' }
 			],
-			legends: chart.series.length > 1 ? [{ fill: 'color', orient: 'top', labelColor: '#8b94b4' }] : [],
+			legends: includeLegend ? [{ fill: 'color', orient: 'top', labelColor: '#8b94b4' }] : [],
 			marks: [
 				{
 					type: 'group',
@@ -154,22 +157,41 @@
 		};
 	}
 
-	$effect(() => {
-		if (!chartHost) {
+	function updateVegaData() {
+		if (!view) {
 			return;
 		}
 
-		if (chart.type === 'TABLE' || chart.series.length === 0 || labels().length === 0) {
-			chartHost.innerHTML = '';
+		void view
+			.change('table', changeset().remove(() => true).insert(toVegaData()))
+			.runAsync()
+			.catch(() => {
+				if (chartHost) {
+					chartHost.innerHTML = '<div class="empty-chart">Unable to update chart.</div>';
+				}
+			});
+	}
+
+	$effect(() => {
+		const host = chartHost;
+		const mode = renderMode;
+		const includeLegend = showLegend;
+
+		if (!host || mode === 'TABLE') {
+			view?.finalize();
+			view = null;
 			return;
 		}
 
 		let disposed = false;
-		let finalize: (() => void) | undefined;
+		view?.finalize();
+		view = null;
+		viewReady += 1;
+		host.innerHTML = '';
 
-		void embed(chartHost, vegaSpec(), {
+		void embed(host, vegaSpec(mode, includeLegend), {
 			actions: false,
-			renderer: 'svg',
+			renderer: 'canvas',
 			theme: 'dark'
 		})
 			.then((result) => {
@@ -177,23 +199,31 @@
 					void result.finalize();
 					return;
 				}
-				finalize = () => {
-					void result.finalize();
-				};
+				view = result.view;
+				viewReady += 1;
 			})
 			.catch(() => {
-				if (chartHost) {
-					chartHost.innerHTML = '<div class="empty-chart">Unable to render chart.</div>';
+				if (host) {
+					host.innerHTML = '<div class="empty-chart">Unable to render chart.</div>';
 				}
 			});
 
 		return () => {
 			disposed = true;
-			finalize?.();
-			if (chartHost) {
-				chartHost.innerHTML = '';
+			view?.finalize();
+			view = null;
+			if (host) {
+				host.innerHTML = '';
 			}
 		};
+	});
+
+	$effect(() => {
+		viewReady;
+		if (chart.type === 'TABLE' || chart.series.length === 0 || labels().length === 0) {
+			return;
+		}
+		updateVegaData();
 	});
 </script>
 
