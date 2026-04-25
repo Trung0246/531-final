@@ -46,9 +46,10 @@ public class DatasetGraphqlController {
     public DashboardView dashboard(@Argument String datasetId,
                                     @Argument Integer maxFiles,
                                     @Argument Integer updateEveryRows,
+                                    @Argument Integer fullDashboardUpdateEveryRows,
                                     @Argument Boolean refresh) throws IOException {
         return dashboardViewService.toDashboardView(
-                datasetAnalyticsService.analyze(UUID.fromString(datasetId), maxFiles, updateEveryRows, Boolean.TRUE.equals(refresh))
+                datasetAnalyticsService.analyze(UUID.fromString(datasetId), maxFiles, updateEveryRows, fullDashboardUpdateEveryRows, Boolean.TRUE.equals(refresh))
         );
     }
 

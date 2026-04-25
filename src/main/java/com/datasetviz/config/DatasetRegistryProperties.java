@@ -7,7 +7,7 @@ import java.io.File;
 @ConfigurationProperties(prefix = "app.registry")
 public class DatasetRegistryProperties {
 
-    private File path = new File("dataset-registry.json");
+    private File path = new File(".dataset.json");
 
     public File getPath() {
         return path;

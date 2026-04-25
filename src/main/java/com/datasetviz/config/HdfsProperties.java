@@ -71,6 +71,7 @@ public class HdfsProperties {
         private int dataNodes = 1;
         private int nameNodePort;
         private boolean format;
+        private boolean allowFormatExisting;
 
         public boolean isEnabled() {
             return enabled;
@@ -110,6 +111,14 @@ public class HdfsProperties {
 
         public void setFormat(boolean format) {
             this.format = format;
+        }
+
+        public boolean isAllowFormatExisting() {
+            return allowFormatExisting;
+        }
+
+        public void setAllowFormatExisting(boolean allowFormatExisting) {
+            this.allowFormatExisting = allowFormatExisting;
         }
     }
 }

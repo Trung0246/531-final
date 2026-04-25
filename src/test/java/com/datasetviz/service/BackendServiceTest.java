@@ -425,7 +425,7 @@ class BackendServiceTest {
         when(datasetRegistryService.getRequired(emailId)).thenReturn(new DatasetRegistration(emailId, "mail", "", DatasetType.EMAIL_ARCHIVE, "/mail", Instant.now()));
         when(datasetRegistryService.getRequired(csvId)).thenReturn(new DatasetRegistration(csvId, "csv", "", DatasetType.CSV_TEXT, "/csv", Instant.now()));
         when(emailAnalyticsService.analyze(emailId, 1, true)).thenReturn(new EmailAnalyticsSnapshot());
-        when(csvAnalyticsService.analyze(csvId, 2, null, false)).thenReturn(new com.datasetviz.model.CsvAnalyticsSnapshot());
+        when(csvAnalyticsService.analyze(csvId, 2, null, null, false)).thenReturn(new com.datasetviz.model.CsvAnalyticsSnapshot());
 
         assertThat(service.analyze(emailId, 1, true)).isInstanceOf(EmailAnalyticsSnapshot.class);
         assertThat(service.analyze(csvId, 2, false)).isInstanceOf(com.datasetviz.model.CsvAnalyticsSnapshot.class);

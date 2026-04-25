@@ -154,14 +154,14 @@ class ControllerTest {
 
         when(datasetRegistryService.listAll()).thenReturn(List.of(registration));
         when(dashboardViewService.toDatasetView(registration)).thenReturn(datasetView);
-        when(datasetAnalyticsService.analyze(datasetId, null, null, false)).thenReturn(snapshot);
+        when(datasetAnalyticsService.analyze(datasetId, null, null, null, false)).thenReturn(snapshot);
         when(dashboardViewService.toDashboardView(snapshot)).thenReturn(dashboardView);
         when(hdfsStorageService.exists("/path")).thenReturn(true);
         when(datasetRegistryService.register(request)).thenReturn(registration);
         when(dashboardViewService.toDatasetView(registration, true)).thenReturn(datasetView);
 
         assertThat(controller.datasets()).containsExactly(datasetView);
-        assertThat(controller.dashboard(datasetId.toString(), null, null, null)).isSameAs(dashboardView);
+        assertThat(controller.dashboard(datasetId.toString(), null, null, null, null)).isSameAs(dashboardView);
         assertThat(controller.registerDataset(request)).isSameAs(datasetView);
     }
 

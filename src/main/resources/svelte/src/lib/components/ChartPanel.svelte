@@ -11,6 +11,9 @@
 	let viewReady = $state(0);
 	let renderMode = $derived(chart.type);
 	let showLegend = $derived(chart.series.length > 1);
+	let latestChart = $state<DashboardChart | null>(null);
+	let currentChart = $derived(latestChart ?? chart);
+	let hasRenderableData = $derived(chartHasData(currentChart));
 
 	const width = 640;
 	const height = 280;
@@ -22,14 +25,14 @@
 		series: string;
 	};
 
-	function labels(): string[] {
+	function labels(input = chart): string[] {
 		return Array.from(
-			new Set(chart.series.flatMap((series: DashboardSeries) => series.points.map((point: DashboardPoint) => point.label)))
+			new Set(input.series.flatMap((series: DashboardSeries) => series.points.map((point: DashboardPoint) => point.label)))
 		);
 	}
 
-	function toVegaData(): VegaDatum[] {
-		return chart.series.flatMap((series: DashboardSeries) =>
+	function toVegaData(input = chart): VegaDatum[] {
+		return input.series.flatMap((series: DashboardSeries) =>
 			series.points.map((point: DashboardPoint) => ({
 				label: point.label,
 				value: point.value,
@@ -38,16 +41,21 @@
 		);
 	}
 
+	function chartHasData(input: DashboardChart): boolean {
+		return input.series.length > 0 && labels(input).length > 0;
+	}
+
 	function tableRows(): string[][] {
-		const allLabels = labels();
-		if (chart.series.length <= 1) {
-			const firstSeries = chart.series[0];
+		const tableChart = currentChart;
+		const allLabels = labels(tableChart);
+		if (tableChart.series.length <= 1) {
+			const firstSeries = tableChart.series[0];
 			return firstSeries ? firstSeries.points.map((point: DashboardPoint) => [point.label, String(point.value)]) : [];
 		}
 
 		return allLabels.map((label: string) => [
 			label,
-			...chart.series.map((series: DashboardSeries) => String(series.points.find((point) => point.label === label)?.value ?? 0))
+			...tableChart.series.map((series: DashboardSeries) => String(series.points.find((point) => point.label === label)?.value ?? 0))
 		]);
 	}
 
@@ -157,13 +165,13 @@
 		};
 	}
 
-	function updateVegaData() {
+	function updateVegaData(input = chart) {
 		if (!view) {
 			return;
 		}
 
 		void view
-			.change('table', changeset().remove(() => true).insert(toVegaData()))
+			.change('table', changeset().remove(() => true).insert(toVegaData(input)))
 			.runAsync()
 			.catch(() => {
 				if (chartHost) {
@@ -219,11 +227,39 @@
 	});
 
 	$effect(() => {
-		viewReady;
-		if (chart.type === 'TABLE' || chart.series.length === 0 || labels().length === 0) {
+		function handleChartUpdate(event: Event) {
+			if (!(event instanceof CustomEvent)) {
+				return;
+			}
+			const updatedChart = (event.detail as DashboardChart[]).find((entry) => entry.id === chart.id);
+			if (!updatedChart) {
+				return;
+			}
+			const nextChart = { ...updatedChart, type: chart.type };
+			latestChart = nextChart;
+			updateVegaData(nextChart);
+		}
+
+		window.addEventListener('dashboard-charts:update', handleChartUpdate);
+		return () => window.removeEventListener('dashboard-charts:update', handleChartUpdate);
+	});
+
+	$effect(() => {
+		const baseChart = chart;
+		latestChart = null;
+		if (baseChart.type === 'TABLE' || !chartHasData(baseChart)) {
 			return;
 		}
-		updateVegaData();
+		updateVegaData(baseChart);
+	});
+
+	$effect(() => {
+		viewReady;
+		const visibleChart = currentChart;
+		if (visibleChart.type === 'TABLE' || !chartHasData(visibleChart)) {
+			return;
+		}
+		updateVegaData(visibleChart);
 	});
 </script>
 
@@ -232,37 +268,42 @@
 		<h3>{chart.title}</h3>
 	</div>
 
-	{#if chart.series.length === 0 || labels().length === 0}
-		<div class="empty-chart">No chart data available.</div>
-	{:else if chart.type === 'TABLE'}
-		<div class="table-wrapper">
-			<table>
-				<thead>
-					<tr>
-						{#if chart.series.length <= 1}
-							<th>Label</th>
-							<th>{chart.series[0]?.name ?? 'Value'}</th>
-						{:else}
-							<th>Label</th>
-							{#each chart.series as series}
-								<th>{series.name}</th>
-							{/each}
-						{/if}
-					</tr>
-				</thead>
-				<tbody>
-					{#each tableRows() as row}
+	{#if chart.type === 'TABLE'}
+		{#if !hasRenderableData}
+			<div class="empty-chart">No chart data available.</div>
+		{:else}
+			<div class="table-wrapper">
+				<table>
+					<thead>
 						<tr>
-							{#each row as cell}
-								<td>{cell}</td>
-							{/each}
+							{#if currentChart.series.length <= 1}
+								<th>Label</th>
+								<th>{currentChart.series[0]?.name ?? 'Value'}</th>
+							{:else}
+								<th>Label</th>
+								{#each currentChart.series as series}
+									<th>{series.name}</th>
+								{/each}
+							{/if}
 						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
+					</thead>
+					<tbody>
+						{#each tableRows() as row}
+							<tr>
+								{#each row as cell}
+									<td>{cell}</td>
+								{/each}
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
 	{:else}
-		<div bind:this={chartHost} class="vega-host"></div>
+		{#if !hasRenderableData}
+			<div class="empty-chart overlay-empty">No chart data available.</div>
+		{/if}
+		<div bind:this={chartHost} class="vega-host" class:hidden-chart={!hasRenderableData}></div>
 	{/if}
 </div>
 
@@ -293,6 +334,15 @@
 		width: 100%;
 		height: auto;
 		overflow: visible;
+	}
+
+	:global(.vega-host canvas) {
+		max-width: 100%;
+		height: auto;
+	}
+
+	.hidden-chart {
+		display: none;
 	}
 
 	.empty-chart {

@@ -42,6 +42,11 @@ public class HdfsConfiguration {
 
         File nameNodeDir = new File(baseDir, "namenode");
         File dataNodeDir = new File(baseDir, "datanode");
+        boolean existingNameNode = new File(nameNodeDir, "current").exists();
+        if (properties.getEmbedded().isFormat() && existingNameNode && !properties.getEmbedded().isAllowFormatExisting()) {
+            throw new IllegalStateException("Refusing to format existing embedded HDFS storage at " + baseDir.getAbsolutePath()
+                    + ". Set app.hdfs.embedded.allow-format-existing=true only when intentional data deletion is required.");
+        }
         configuration.set(MiniDFSCluster.HDFS_MINIDFS_BASEDIR, baseDir.getAbsolutePath());
         configuration.set("dfs.namenode.name.dir", nameNodeDir.toURI().toString());
         configuration.set("dfs.datanode.data.dir", dataNodeDir.toURI().toString());
@@ -52,7 +57,7 @@ public class HdfsConfiguration {
                 .nameNodeHttpPort(0)
                 .numDataNodes(Math.max(1, properties.getEmbedded().getDataNodes()))
                 .checkExitOnShutdown(false)
-                .format(properties.getEmbedded().isFormat() || !new File(nameNodeDir, "current").exists());
+                .format(properties.getEmbedded().isFormat() || !existingNameNode);
         if (properties.getEmbedded().getNameNodePort() > 0) {
             builder.nameNodePort(properties.getEmbedded().getNameNodePort());
         }

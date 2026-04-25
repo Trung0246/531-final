@@ -27,10 +27,18 @@ public class DatasetAnalyticsService {
     }
 
     public Object analyze(UUID datasetId, Integer requestedMaxFiles, Integer requestedUpdateEveryRows, boolean refresh) throws IOException {
+        return analyze(datasetId, requestedMaxFiles, requestedUpdateEveryRows, null, refresh);
+    }
+
+    public Object analyze(UUID datasetId,
+                          Integer requestedMaxFiles,
+                          Integer requestedUpdateEveryRows,
+                          Integer requestedFullDashboardUpdateEveryRows,
+                          boolean refresh) throws IOException {
         DatasetRegistration dataset = datasetRegistryService.getRequired(datasetId);
         return switch (dataset.getDatasetType()) {
             case EMAIL_ARCHIVE -> emailAnalyticsService.analyze(datasetId, requestedMaxFiles, refresh);
-            case CSV_TEXT -> csvAnalyticsService.analyze(datasetId, requestedMaxFiles, requestedUpdateEveryRows, refresh);
+            case CSV_TEXT -> csvAnalyticsService.analyze(datasetId, requestedMaxFiles, requestedUpdateEveryRows, requestedFullDashboardUpdateEveryRows, refresh);
             default -> throw new IllegalArgumentException("Current analytics implementation supports EMAIL_ARCHIVE and CSV_TEXT datasets only.");
         };
     }

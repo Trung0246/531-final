@@ -1,6 +1,6 @@
 type Query {
   datasets: [Dataset!]!
-  dashboard(datasetId: ID!, maxFiles: Int, refresh: Boolean = false, updateEveryRows: Int): DashboardSnapshot!
+  dashboard(datasetId: ID!, maxFiles: Int, refresh: Boolean = false, updateEveryRows: Int, fullDashboardUpdateEveryRows: Int): DashboardSnapshot!
 }
 
 type Mutation {

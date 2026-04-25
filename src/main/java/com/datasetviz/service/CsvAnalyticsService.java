@@ -62,7 +62,7 @@ public class CsvAnalyticsService {
     private static final int ROW_PROGRESS_INTERVAL = 25_000;
     private static final int MIN_ROW_PROGRESS_INTERVAL = 50;
     private static final int MAX_ROW_PROGRESS_INTERVAL = 1_000_000;
-    private static final int DASHBOARD_PROGRESS_INTERVAL = 5_000;
+    private static final int DASHBOARD_PROGRESS_INTERVAL = 500;
 
     private static final List<String> DATE_COLUMN_CANDIDATES = List.of(
             "observationdate", "date", "reportdate", "lastupdate", "lastupdated", "updatedate"
@@ -127,6 +127,14 @@ public class CsvAnalyticsService {
     }
 
     public CsvAnalyticsSnapshot analyze(UUID datasetId, Integer requestedMaxFiles, Integer requestedUpdateEveryRows, boolean refresh) throws IOException {
+        return analyze(datasetId, requestedMaxFiles, requestedUpdateEveryRows, null, refresh);
+    }
+
+    public CsvAnalyticsSnapshot analyze(UUID datasetId,
+                                        Integer requestedMaxFiles,
+                                        Integer requestedUpdateEveryRows,
+                                        Integer requestedFullDashboardUpdateEveryRows,
+                                        boolean refresh) throws IOException {
         DatasetRegistration dataset = datasetRegistryService.getRequired(datasetId);
         if (dataset.getDatasetType() != DatasetType.CSV_TEXT) {
             throw new IllegalArgumentException("Current CSV analytics implementation supports CSV_TEXT datasets only.");
@@ -134,6 +142,7 @@ public class CsvAnalyticsService {
 
         int maxFiles = resolveMaxFiles(requestedMaxFiles);
         int updateEveryRows = resolveUpdateEveryRows(requestedUpdateEveryRows);
+        int fullDashboardUpdateEveryRows = resolveFullDashboardUpdateEveryRows(requestedFullDashboardUpdateEveryRows);
         String cacheKey = datasetId + ":" + maxFiles;
         CachedSnapshot cachedSnapshot = cache.get(cacheKey);
         if (!refresh && cachedSnapshot != null && !cachedSnapshot.isExpired(analyticsProperties.getCacheTtl().toMillis())) {
@@ -158,7 +167,7 @@ public class CsvAnalyticsService {
             currentFile.start("Scanning file.");
             publishProgress(datasetId, dataset, "processing", "Scanning " + fileName(filePath), mutableAnalytics, filePaths.size(), fileProgress, false, false, false);
             try (InputStream inputStream = hdfsStorageService.open(filePath)) {
-                analyzeFile(datasetId, dataset, inputStream, filePath, mutableAnalytics, filePaths.size(), currentFile, fileProgress, updateEveryRows);
+                analyzeFile(datasetId, dataset, inputStream, filePath, mutableAnalytics, filePaths.size(), currentFile, fileProgress, updateEveryRows, fullDashboardUpdateEveryRows);
                 currentFile.complete("Finished file.");
                 publishProgress(datasetId, dataset, "processing", "Finished " + fileName(filePath), mutableAnalytics, filePaths.size(), fileProgress, false, true, true);
             } catch (Exception exception) {
@@ -182,7 +191,8 @@ public class CsvAnalyticsService {
                              int totalFiles,
                              MutableFileProgress currentFile,
                              List<MutableFileProgress> fileProgress,
-                             int updateEveryRows) throws IOException {
+                             int updateEveryRows,
+                             int fullDashboardUpdateEveryRows) throws IOException {
         if (isSpreadsheetFile(filePath)) {
             int beforeRows = mutableAnalytics.getProcessedRows();
             analyzeSpreadsheetFile(inputStream, mutableAnalytics);
@@ -225,7 +235,7 @@ public class CsvAnalyticsService {
                 mutableAnalytics.acceptRecord(schema, new TabularRecord(iterator.next()));
                 currentFile.processedRows++;
                 if (mutableAnalytics.getProcessedRows() % updateEveryRows == 0) {
-                    boolean includeDashboard = mutableAnalytics.getProcessedRows() % DASHBOARD_PROGRESS_INTERVAL == 0;
+                    boolean includeDashboard = mutableAnalytics.getProcessedRows() % fullDashboardUpdateEveryRows == 0;
                     publishProgress(datasetId, dataset, "processing", "Processed " + currentFile.processedRows + " rows from " + fileName(filePath), mutableAnalytics, totalFiles, fileProgress, false, true, includeDashboard);
                 }
             }
@@ -354,6 +364,13 @@ public class CsvAnalyticsService {
             return ROW_PROGRESS_INTERVAL;
         }
         return Math.min(Math.max(requestedUpdateEveryRows, MIN_ROW_PROGRESS_INTERVAL), MAX_ROW_PROGRESS_INTERVAL);
+    }
+
+    private int resolveFullDashboardUpdateEveryRows(Integer requestedFullDashboardUpdateEveryRows) {
+        if (requestedFullDashboardUpdateEveryRows == null || requestedFullDashboardUpdateEveryRows < 1) {
+            return DASHBOARD_PROGRESS_INTERVAL;
+        }
+        return Math.min(Math.max(requestedFullDashboardUpdateEveryRows, MIN_ROW_PROGRESS_INTERVAL), MAX_ROW_PROGRESS_INTERVAL);
     }
 
     private boolean isSpreadsheetFile(String filePath) {

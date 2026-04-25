@@ -28,8 +28,8 @@
 	`;
 
 	const DASHBOARD_QUERY = `
-		query Dashboard($datasetId: ID!, $maxFiles: Int, $refresh: Boolean!, $updateEveryRows: Int) {
-			dashboard(datasetId: $datasetId, maxFiles: $maxFiles, refresh: $refresh, updateEveryRows: $updateEveryRows) {
+		query Dashboard($datasetId: ID!, $maxFiles: Int, $refresh: Boolean!, $updateEveryRows: Int, $fullDashboardUpdateEveryRows: Int) {
+			dashboard(datasetId: $datasetId, maxFiles: $maxFiles, refresh: $refresh, updateEveryRows: $updateEveryRows, fullDashboardUpdateEveryRows: $fullDashboardUpdateEveryRows) {
 				datasetId
 				datasetName
 				datasetType
@@ -88,17 +88,21 @@
 
 	const chartModes: ChartMode[] = ['BAR', 'LINE', 'TABLE'];
 	const focusValueLimit = 40;
+	const selectedDatasetStorageKey = 'datasetviz:selectedDatasetId';
+	const updateEveryRowsStorageKey = 'datasetviz:updateEveryRows';
+	const fullDashboardUpdateEveryRowsStorageKey = 'datasetviz:fullDashboardUpdateEveryRows';
+	const chartShellUpdateIntervalMs = 1000;
 	type MessageState = { text: string; type: 'info' | 'success' | 'error' };
 
 	let datasets = $state<DatasetView[]>([]);
 	let files = $state<HdfsFileDescriptor[]>([]);
 	let dashboard = $state<DashboardView | null>(null);
-	let liveCharts = $state<DashboardChart[] | null>(null);
 	let chartTypeOverrides = $state<Record<string, ChartMode>>({});
 	let chartFocusOverrides = $state<Record<string, string[]>>({});
 	let selectedDatasetId = $state('');
 	let maxFiles = $state(5000);
 	let updateEveryRows = $state(25000);
+	let fullDashboardUpdateEveryRows = $state(500);
 	let refresh = $state(false);
 	let isRegistering = $state(false);
 	let isImporting = $state(false);
@@ -108,7 +112,14 @@
 	let isLoadingDatasets = $state(false);
 	let message = $state<MessageState>({ text: '', type: 'info' });
 	let dashboardProgress = $state<DashboardProgressEvent | null>(null);
+	let progressMessage = $state('');
+	let progressScannedFiles = $state(0);
+	let progressTotalFiles = $state(0);
+	let progressProcessedRows = $state(0);
+	let progressFailedFiles = $state(0);
+	let progressFiles = $state<DashboardProgressEvent['files']>([]);
 	let progressWorker = $state<Worker | null>(null);
+	let lastChartShellUpdate = 0;
 	let form = $state<RegisterDatasetInput>({
 		name: '',
 	description: '',
@@ -138,6 +149,51 @@
 		return error instanceof Error ? error.message : 'Unexpected error';
 	}
 
+	function storedPositiveInt(key: string, fallback: number): number {
+		const rawValue = localStorage.getItem(key);
+		const parsedValue = rawValue == null ? Number.NaN : Number.parseInt(rawValue, 10);
+		return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : fallback;
+	}
+
+	function applyProgressSummary(progress: DashboardProgressEvent) {
+		progressMessage = progress.message;
+		progressScannedFiles = progress.scannedFiles;
+		progressTotalFiles = progress.totalFiles;
+		progressProcessedRows = progress.processedRows;
+		progressFailedFiles = progress.failedFiles;
+		progressFiles = progress.files;
+	}
+
+	function clearProgressSummary() {
+		progressMessage = '';
+		progressScannedFiles = 0;
+		progressTotalFiles = 0;
+		progressProcessedRows = 0;
+		progressFailedFiles = 0;
+		progressFiles = [];
+	}
+
+	function updateDashboardChartShell(charts: DashboardChart[], force = false) {
+		if (!dashboard || charts.length === 0) {
+			return;
+		}
+
+		const now = performance.now();
+		if (!force && now - lastChartShellUpdate < chartShellUpdateIntervalMs) {
+			return;
+		}
+
+		const chartById = new Map(charts.map((chart) => [chart.id, chart]));
+		dashboard = {
+			...dashboard,
+			charts: dashboard.charts.map((chart) => {
+				const updatedChart = chartById.get(chart.id);
+				return updatedChart ? { ...updatedChart, type: chart.type } : chart;
+			})
+		};
+		lastChartShellUpdate = now;
+	}
+
 	function closeProgressSocket() {
 		progressWorker?.postMessage({ type: 'close' });
 		progressWorker?.terminate();
@@ -154,13 +210,36 @@
 		worker.onmessage = (event: MessageEvent<{ type: string; progress?: DashboardProgressEvent; message?: string }>) => {
 			if (event.data.type === 'progress' && event.data.progress) {
 				const progress = event.data.progress;
-				dashboardProgress = progress;
-				if (progress.charts?.length) {
-					liveCharts = progress.charts;
+				if (progress.stage === 'connected') {
+					return;
 				}
+				applyProgressSummary(progress);
+				dashboardProgress = { ...progress, charts: [], dashboard: null };
 				if (progress.dashboard) {
 					dashboard = progress.dashboard;
-					liveCharts = progress.dashboard.charts;
+					lastChartShellUpdate = performance.now();
+				} else if (!dashboard && progress.charts?.length && selectedDataset) {
+					dashboard = {
+						datasetId: selectedDataset.id,
+						datasetName: selectedDataset.name,
+						datasetType: selectedDataset.datasetType,
+						hdfsPath: selectedDataset.hdfsPath,
+						generatedAt: new Date().toISOString(),
+						maxFiles,
+						summaryItems: [],
+						charts: progress.charts,
+						columnProfiles: [],
+						listPanel: null,
+						tablePanel: null
+					};
+					lastChartShellUpdate = performance.now();
+				} else if (progress.charts?.length) {
+					updateDashboardChartShell(progress.charts, progress.complete);
+				}
+				if (progress.charts?.length) {
+					requestAnimationFrame(() => {
+						window.dispatchEvent(new CustomEvent<DashboardChart[]>('dashboard-charts:update', { detail: progress.charts }));
+					});
 				}
 				if (!progress.complete) {
 					setMessage(progress.message, 'info');
@@ -211,10 +290,6 @@
 
 	function selectedValues(chart: DashboardChart): string[] {
 		return chartFocusOverrides[chart.id] ?? selectableValues(chart);
-	}
-
-	function visibleCharts(): DashboardChart[] {
-		return liveCharts ?? dashboard?.charts ?? [];
 	}
 
 	function setChartType(chartId: string, mode: string) {
@@ -291,7 +366,6 @@
 			if (datasets.length === 0) {
 				selectedDatasetId = '';
 				dashboard = null;
-				liveCharts = null;
 				files = [];
 			}
 			if (selectedDatasetId) {
@@ -316,12 +390,16 @@
 	}
 
 	async function handleDatasetSelectionChange() {
+		localStorage.setItem(selectedDatasetStorageKey, selectedDatasetId);
 		dashboard = null;
-		liveCharts = null;
 		dashboardProgress = null;
+		clearProgressSummary();
 		closeProgressSocket();
 		deleteFilePath = '';
 		await loadFiles();
+		if (selectedDatasetId) {
+			openProgressSocket(selectedDatasetId);
+		}
 	}
 
 	async function loadDashboard() {
@@ -340,7 +418,9 @@
 
 		isLoadingDashboard = true;
 		dashboardProgress = null;
-		liveCharts = null;
+		clearProgressSummary();
+		localStorage.setItem(updateEveryRowsStorageKey, String(updateEveryRows));
+		localStorage.setItem(fullDashboardUpdateEveryRowsStorageKey, String(fullDashboardUpdateEveryRows));
 		openProgressSocket(selectedDatasetId);
 		setMessage('Loading dashboard...', 'info');
 		try {
@@ -348,10 +428,10 @@
 				datasetId: selectedDatasetId,
 				maxFiles,
 				updateEveryRows,
+				fullDashboardUpdateEveryRows,
 				refresh
 			});
 			dashboard = data.dashboard;
-			liveCharts = data.dashboard.charts;
 			chartTypeOverrides = {};
 			chartFocusOverrides = {};
 			setMessage(`Loaded ${data.dashboard.datasetName}.`, 'success');
@@ -372,6 +452,7 @@
 			});
 			await loadDatasets();
 			selectedDatasetId = data.registerDataset.id;
+			localStorage.setItem(selectedDatasetStorageKey, selectedDatasetId);
 			form = {
 				name: '',
 				description: '',
@@ -407,7 +488,6 @@
 				targetSubdirectory: importForm.targetSubdirectory
 			};
 			dashboard = null;
-			liveCharts = null;
 			await loadDatasets();
 			setMessage(`Imported directory into ${selectedDataset?.name ?? 'dataset'}.`, 'success');
 		} catch (error) {
@@ -448,7 +528,6 @@
 				body: formData
 			});
 			dashboard = null;
-			liveCharts = null;
 			await loadDatasets();
 			setMessage(`Uploaded ${remoteFiles.length} file(s) into ${selectedDataset?.name ?? 'dataset'}.`, 'success');
 		} catch (error) {
@@ -472,7 +551,6 @@
 			});
 			deleteFilePath = '';
 			dashboard = null;
-			liveCharts = null;
 			await loadFiles();
 			setMessage('Deleted file from dataset.', 'success');
 		} catch (error) {
@@ -484,7 +562,13 @@
 
 	onMount(async () => {
 		try {
+			selectedDatasetId = localStorage.getItem(selectedDatasetStorageKey) ?? '';
+			updateEveryRows = storedPositiveInt(updateEveryRowsStorageKey, updateEveryRows);
+			fullDashboardUpdateEveryRows = storedPositiveInt(fullDashboardUpdateEveryRowsStorageKey, fullDashboardUpdateEveryRows);
 			await loadDatasets();
+			if (selectedDatasetId) {
+				openProgressSocket(selectedDatasetId);
+			}
 			setMessage('Ready. Register a dataset or load one from the list.', 'success');
 		} catch (error) {
 			setMessage(toMessage(error), 'error');
@@ -682,6 +766,10 @@
 					<span>Update every rows</span>
 					<input bind:value={updateEveryRows} type="number" min="50" step="50" />
 				</label>
+				<label>
+					<span>Full dashboard update rows</span>
+					<input bind:value={fullDashboardUpdateEveryRows} type="number" min="50" step="50" />
+				</label>
 				<label class="checkbox-field">
 					<input bind:checked={refresh} type="checkbox" />
 					<span>Force refresh</span>
@@ -689,7 +777,7 @@
 			</div>
 
 			<div class="flow-note dashboard-note">
-				Max files limits how many files are scanned. Update every rows controls lightweight row/file progress and live chart data; full dashboard panels refresh less often to keep the UI responsive.
+				Max files limits how many files are scanned. Update every rows controls lightweight row/file progress and live chart data. Full dashboard update rows controls list/table/preview/focus-picker refresh cadence.
 			</div>
 			{#if !selectedDatasetSupportsDashboard}
 				<div class="flow-note dashboard-note warning-note">
@@ -704,17 +792,17 @@
 			{#if isLoadingDashboard || dashboardProgress}
 				<div class="progress-panel">
 					<div class="progress-copy">
-						<strong>{dashboardProgress?.message ?? 'Starting dashboard load...'}</strong>
+						<strong>{progressMessage || 'Starting dashboard load...'}</strong>
 						<span>
-							{dashboardProgress?.scannedFiles ?? 0}/{dashboardProgress?.totalFiles ?? 0} files · {dashboardProgress?.processedRows ?? 0} rows · {dashboardProgress?.failedFiles ?? 0} failed
+							{progressScannedFiles}/{progressTotalFiles} files · {progressProcessedRows} rows · {progressFailedFiles} failed
 						</span>
 					</div>
 					{#if dashboardProgress?.dashboard}
 						<div class="stream-note">Charts and previews below are live partial results and will continue updating until the scan completes.</div>
 					{/if}
-					{#if dashboardProgress?.files?.length}
+					{#if progressFiles.length}
 						<div class="file-progress-grid">
-							{#each dashboardProgress.files as file}
+							{#each progressFiles as file}
 								<article class={`file-progress-card ${file.status}`}>
 									<div>
 										<strong>{file.name}</strong>
@@ -775,7 +863,7 @@
 		{/if}
 
 		<section class="chart-grid">
-			{#each visibleCharts() as chart (chart.id)}
+			{#each dashboard.charts as chart (chart.id)}
 				{@const focusValues = selectableValues(chart)}
 				{@const displayChart = resolvedChart(chart)}
 				<article class="panel chart-card">

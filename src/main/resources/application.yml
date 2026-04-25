@@ -20,7 +20,7 @@ management:
 
 app:
   registry:
-    path: ${APP_REGISTRY_PATH:dataset-registry.json}
+    path: ${APP_REGISTRY_PATH:.dataset.json}
   hdfs:
     uri: ${APP_HDFS_URI:hdfs://localhost:9000}
     user: ${APP_HDFS_USER:}
@@ -37,6 +37,8 @@ app:
       name-node-port: ${APP_HDFS_EMBEDDED_NAME_NODE_PORT:0}
       # False preserves embedded HDFS across restarts; first startup still formats if storage is missing.
       format: ${APP_HDFS_EMBEDDED_FORMAT:false}
+      # Must be true to format an existing embedded HDFS directory. Prevents accidental data loss on restart.
+      allow-format-existing: ${APP_HDFS_EMBEDDED_ALLOW_FORMAT_EXISTING:false}
     configuration:
       dfs.client.use.datanode.hostname: ${APP_HDFS_USE_DATANODE_HOSTNAME:true}
   analytics:
