@@ -3,6 +3,7 @@ package com.datasetviz.config;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.hdfs.MiniDFSCluster;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.DisposableBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -27,9 +28,9 @@ public class HdfsConfiguration {
         return configuration;
     }
 
-    @Bean(destroyMethod = "shutdown")
+    @Bean(destroyMethod = "")
     public MiniDFSCluster miniDfsCluster(org.apache.hadoop.conf.Configuration configuration,
-                                         HdfsProperties properties) throws IOException {
+                                          HdfsProperties properties) throws IOException {
         if (!properties.getEmbedded().isEnabled()) {
             return null;
         }
@@ -66,6 +67,23 @@ public class HdfsConfiguration {
         cluster.waitClusterUp();
         configuration.set("fs.defaultFS", cluster.getFileSystem().getUri().toString());
         return cluster;
+    }
+
+    @Bean
+    public DisposableBean miniDfsClusterShutdown(ObjectProvider<MiniDFSCluster> miniDfsClusterProvider,
+                                                 ObjectProvider<FileSystem> fileSystemProvider) {
+        return () -> {
+            MiniDFSCluster cluster = miniDfsClusterProvider.getIfAvailable();
+            if (cluster == null) {
+                return;
+            }
+            FileSystem fileSystem = fileSystemProvider.getIfAvailable();
+            if (fileSystem != null) {
+                fileSystem.close();
+            }
+            cluster.shutdownDataNodes();
+            cluster.shutdownNameNodes();
+        };
     }
 
     @Bean(destroyMethod = "close")

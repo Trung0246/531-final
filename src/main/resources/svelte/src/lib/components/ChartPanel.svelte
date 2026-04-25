@@ -3,6 +3,10 @@
 
 	let { chart, mode } = $props<{ chart: DashboardChart; mode?: DashboardChart['type'] }>();
 
+	const useVega = import.meta.env.VITE_DASHBOARD_CHART_RENDERER === 'vega';
+
+	let vegaHost = $state<HTMLDivElement | null>(null);
+	let vegaView: { finalize: () => void } | null = null;
 	let latestChart = $state<DashboardChart | null>(null);
 	let renderMode = $derived(mode ?? chart.type);
 	let currentChart = $derived(latestChart ?? chart);
@@ -40,6 +44,10 @@
 				labelIndex: allLabels.indexOf(point.label)
 			}))
 		);
+	}
+
+	function chartHasData(input: DashboardChart): boolean {
+		return input.series.length > 0 && labels(input).length > 0;
 	}
 
 	function tableRows(): string[][] {
@@ -90,6 +98,98 @@
 		const step = Math.ceil(chartLabels.length / 10);
 		return chartLabels.filter((_, index) => index % step === 0);
 	}
+
+	function vegaData(input: DashboardChart) {
+		return input.series.flatMap((series) =>
+			series.points.map((point) => ({
+				label: point.label,
+				value: point.value,
+				series: series.name
+			}))
+		);
+	}
+
+	function vegaSpec(input: DashboardChart, selectedMode: string) {
+		const values = vegaData(input);
+		return {
+			$schema: 'https://vega.github.io/schema/vega/v6.json',
+			background: 'transparent',
+			width,
+			height,
+			padding: { top: 8, right: 20, bottom: 46, left: 48 },
+			data: [{ name: 'table', values }],
+			scales: [
+				{
+					name: 'x',
+					type: selectedMode === 'LINE' ? 'point' : 'band',
+					domain: { data: 'table', field: 'label' },
+					range: 'width',
+					padding: selectedMode === 'LINE' ? 0.5 : 0.2
+				},
+				{ name: 'y', type: 'linear', domain: { data: 'table', field: 'value' }, nice: true, zero: true, range: 'height' },
+				{ name: 'color', type: 'ordinal', domain: { data: 'table', field: 'series' }, range: palette }
+			],
+			axes: [
+				{ orient: 'bottom', scale: 'x', labelColor: '#8b94b4', domainColor: 'rgba(255,255,255,0.14)', tickColor: 'rgba(255,255,255,0.14)' },
+				{ orient: 'left', scale: 'y', labelColor: '#8b94b4', gridColor: 'rgba(255,255,255,0.08)', domain: false, tickColor: 'rgba(255,255,255,0.14)' }
+			],
+			legends: input.series.length > 1 ? [{ fill: 'color', orient: 'top', labelColor: '#8b94b4' }] : [],
+			marks:
+				selectedMode === 'LINE'
+					? [
+							{
+								type: 'group',
+								from: { facet: { name: 'seriesFacet', data: 'table', groupby: 'series' } },
+								marks: [
+									{
+										type: 'line',
+										from: { data: 'seriesFacet' },
+										encode: { update: { x: { scale: 'x', field: 'label' }, y: { scale: 'y', field: 'value' }, stroke: { scale: 'color', field: 'series' }, strokeWidth: { value: 3 } } }
+									}
+								]
+							}
+						]
+					: [
+							{
+								type: 'rect',
+								from: { data: 'table' },
+								encode: { update: { x: { scale: 'x', field: 'label' }, width: { scale: 'x', band: 0.7 }, y: { scale: 'y', field: 'value' }, y2: { scale: 'y', value: 0 }, fill: { scale: 'color', field: 'series' } } }
+							}
+						]
+		};
+	}
+
+	$effect(() => {
+		const host = vegaHost;
+		const selectedMode = renderMode;
+		const selectedChart = currentChart;
+		if (!useVega || !host || selectedMode === 'TABLE' || !chartHasData(selectedChart)) {
+			vegaView?.finalize();
+			vegaView = null;
+			return;
+		}
+
+		let disposed = false;
+		vegaView?.finalize();
+		vegaView = null;
+		host.innerHTML = '';
+		void import('vega-embed').then(({ default: embed }) =>
+			embed(host, vegaSpec(selectedChart, selectedMode) as never, { actions: false, renderer: 'canvas', theme: 'dark' })
+				.then((result) => {
+					if (disposed) {
+						result.finalize();
+						return;
+					}
+					vegaView = result.view;
+				})
+		);
+
+		return () => {
+			disposed = true;
+			vegaView?.finalize();
+			vegaView = null;
+		};
+	});
 
 	$effect(() => {
 		function handleChartUpdate(event: Event) {
@@ -150,6 +250,8 @@
 		{/if}
 	{:else if !hasRenderableData}
 		<div class="empty-chart">No chart data available.</div>
+	{:else if useVega}
+		<div bind:this={vegaHost} class="vega-host"></div>
 	{:else}
 		<svg class="chart-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={chart.title}>
 			<line class="axis" x1={padding.left} y1={padding.top + plotHeight} x2={padding.left + plotWidth} y2={padding.top + plotHeight} />
@@ -205,6 +307,20 @@
 		width: 100%;
 		min-height: 280px;
 		overflow: visible;
+	}
+
+	.vega-host {
+		width: 100%;
+		min-height: 280px;
+	}
+
+	:global(.vega-host .vega-actions) {
+		display: none;
+	}
+
+	:global(.vega-host canvas) {
+		max-width: 100%;
+		height: auto;
 	}
 
 	.axis {
