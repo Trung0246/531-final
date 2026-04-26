@@ -247,6 +247,9 @@
 	}
 
 	function handleProgress(progress: DashboardProgressEvent) {
+		if (progress.datasetId !== selectedDatasetId) {
+			return;
+		}
 		if (progress.stage === 'connected') {
 			return;
 		}
@@ -440,10 +443,6 @@
 	}
 
 	async function handleDatasetSelectionChange() {
-		const previousDashboardDatasetId = activeDashboardDatasetId;
-		if (previousDashboardDatasetId && previousDashboardDatasetId !== selectedDatasetId) {
-			await cancelDashboard(previousDashboardDatasetId, true);
-		}
 		dashboardRequestSequence++;
 		localStorage.setItem(selectedDatasetStorageKey, selectedDatasetId);
 		dashboard = null;
@@ -676,7 +675,6 @@
 	});
 
 	onDestroy(() => {
-		void cancelDashboard(activeDashboardDatasetId, true);
 		closeProgressSocket();
 	});
 </script>

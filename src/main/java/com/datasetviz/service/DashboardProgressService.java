@@ -50,6 +50,10 @@ public class DashboardProgressService {
         sessions.forEach(session -> publishToSession(session, event));
     }
 
+    public void clear(String datasetId) {
+        latestEventByDataset.remove(datasetId);
+    }
+
     private void publishToSession(WebSocketSession session, DashboardProgressEvent event) {
         if (!session.isOpen()) {
             return;
@@ -74,8 +78,8 @@ public class DashboardProgressService {
                 event.processedRows(),
                 event.failedFiles(),
                 event.files(),
-                List.of(),
-                null,
+                event.complete() ? event.charts() : List.of(),
+                event.complete() ? event.dashboard() : null,
                 event.complete()
         );
     }

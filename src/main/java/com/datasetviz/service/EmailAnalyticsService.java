@@ -130,6 +130,7 @@ public class EmailAnalyticsService {
     public void invalidateCache(UUID datasetId) {
         String cacheKeyPrefix = datasetId + ":";
         cache.keySet().removeIf(key -> key.startsWith(cacheKeyPrefix));
+        dashboardProgressService.clear(datasetId.toString());
     }
 
     private int resolveMaxFiles(Integer requestedMaxFiles) {

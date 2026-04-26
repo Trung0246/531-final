@@ -133,6 +133,7 @@ public class CsvAnalyticsService {
     public void invalidateCache(UUID datasetId) {
         String cacheKeyPrefix = datasetId + ":";
         cache.keySet().removeIf(key -> key.startsWith(cacheKeyPrefix));
+        dashboardProgressService.clear(datasetId.toString());
     }
 
     public CsvAnalyticsSnapshot analyze(UUID datasetId, Integer requestedMaxFiles, Integer requestedUpdateEveryRows, boolean refresh) throws IOException {
