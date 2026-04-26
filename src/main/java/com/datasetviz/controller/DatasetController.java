@@ -6,6 +6,7 @@ import com.datasetviz.model.DatasetRegistration;
 import com.datasetviz.model.DatasetType;
 import com.datasetviz.model.HdfsFileDescriptor;
 import com.datasetviz.service.DatasetImportService;
+import com.datasetviz.service.DatasetAnalyticsService;
 import com.datasetviz.service.DatasetRegistryService;
 import com.datasetviz.service.HdfsStorageService;
 import jakarta.validation.Valid;
@@ -31,13 +32,16 @@ public class DatasetController {
 
     private final DatasetRegistryService datasetRegistryService;
     private final DatasetImportService datasetImportService;
+    private final DatasetAnalyticsService datasetAnalyticsService;
     private final HdfsStorageService hdfsStorageService;
 
     public DatasetController(DatasetRegistryService datasetRegistryService,
                              DatasetImportService datasetImportService,
+                             DatasetAnalyticsService datasetAnalyticsService,
                              HdfsStorageService hdfsStorageService) {
         this.datasetRegistryService = datasetRegistryService;
         this.datasetImportService = datasetImportService;
+        this.datasetAnalyticsService = datasetAnalyticsService;
         this.hdfsStorageService = hdfsStorageService;
     }
 
@@ -63,6 +67,12 @@ public class DatasetController {
         return ResponseEntity.status(HttpStatus.CREATED).body(datasetImportService.importRemoteFiles(datasetId, datasetType, files, targetSubdirectory));
     }
 
+    @PostMapping("/{datasetId}/dashboard/cancel")
+    public ResponseEntity<Void> cancelDashboard(@PathVariable UUID datasetId) {
+        boolean cancelled = datasetAnalyticsService.cancel(datasetId);
+        return cancelled ? ResponseEntity.accepted().build() : ResponseEntity.noContent().build();
+    }
+
     @DeleteMapping("/{datasetId}/files")
     public ResponseEntity<Void> deleteFile(@PathVariable UUID datasetId,
                                            @RequestParam String path) throws IOException {
@@ -82,12 +92,18 @@ public class DatasetController {
 
     @GetMapping("/{datasetId}/files")
     public List<HdfsFileDescriptor> listFiles(@PathVariable UUID datasetId,
-                                               @RequestParam(defaultValue = "50") int limit,
-                                               @RequestParam(defaultValue = "true") boolean recursive) throws IOException {
+                                                @RequestParam(defaultValue = "50") int limit,
+                                                @RequestParam(defaultValue = "true") boolean recursive) throws IOException {
+        if (recursive) {
+            return datasetImportService.listDatasetFiles(datasetId, Math.max(1, limit));
+        }
         DatasetRegistration dataset = datasetRegistryService.getRequired(datasetId);
+        if (!hdfsStorageService.exists(dataset.getHdfsPath())) {
+            datasetImportService.listDatasetFiles(datasetId, Math.max(1, limit));
+        }
         if (!hdfsStorageService.exists(dataset.getHdfsPath())) {
             return List.of();
         }
-        return hdfsStorageService.listFiles(dataset.getHdfsPath(), recursive, Math.max(1, limit));
+        return hdfsStorageService.listFiles(dataset.getHdfsPath(), false, Math.max(1, limit));
     }
 }

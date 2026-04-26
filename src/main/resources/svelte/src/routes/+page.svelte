@@ -120,6 +120,8 @@
 	let progressFiles = $state<DashboardProgressEvent['files']>([]);
 	let progressSocket: WebSocket | null = null;
 	let lastChartShellUpdate = 0;
+	let activeDashboardDatasetId = '';
+	let dashboardRequestSequence = 0;
 	let form = $state<RegisterDatasetInput>({
 		name: '',
 	description: '',
@@ -423,9 +425,15 @@
 	}
 
 	async function handleDatasetSelectionChange() {
+		const previousDashboardDatasetId = activeDashboardDatasetId;
+		if (previousDashboardDatasetId && previousDashboardDatasetId !== selectedDatasetId) {
+			await cancelDashboard(previousDashboardDatasetId, true);
+		}
+		dashboardRequestSequence++;
 		localStorage.setItem(selectedDatasetStorageKey, selectedDatasetId);
 		dashboard = null;
 		dashboardProgress = null;
+		isLoadingDashboard = false;
 		clearProgressSummary();
 		closeProgressSocket();
 		deleteFilePath = '';
@@ -450,6 +458,8 @@
 		}
 
 		isLoadingDashboard = true;
+		const requestSequence = ++dashboardRequestSequence;
+		activeDashboardDatasetId = selectedDatasetId;
 		dashboardProgress = null;
 		clearProgressSummary();
 		localStorage.setItem(updateEveryRowsStorageKey, String(updateEveryRows));
@@ -457,6 +467,7 @@
 		openProgressSocket(selectedDatasetId);
 		setMessage('Loading dashboard...', 'info');
 		try {
+			const requestedDatasetId = selectedDatasetId;
 			const data = await graphqlRequest<{ dashboard: DashboardView }>(DASHBOARD_QUERY, {
 				datasetId: selectedDatasetId,
 				maxFiles,
@@ -464,6 +475,9 @@
 				fullDashboardUpdateEveryRows,
 				refresh
 			});
+			if (requestSequence !== dashboardRequestSequence || selectedDatasetId !== requestedDatasetId) {
+				return;
+			}
 			dashboard = data.dashboard;
 			progressMessage = 'Dashboard analytics ready.';
 			progressScannedFiles = summaryInt('Scanned files');
@@ -477,10 +491,39 @@
 			chartFocusOverrides = {};
 			setMessage(`Loaded ${data.dashboard.datasetName}.`, 'success');
 		} catch (error) {
+			if (requestSequence !== dashboardRequestSequence) {
+				return;
+			}
 			setMessage(toMessage(error), 'error');
 		} finally {
-			isLoadingDashboard = false;
-			closeProgressSocket();
+			if (requestSequence === dashboardRequestSequence) {
+				isLoadingDashboard = false;
+				activeDashboardDatasetId = '';
+				closeProgressSocket();
+			}
+		}
+	}
+
+	async function cancelDashboard(datasetId = activeDashboardDatasetId, silent = false) {
+		if (!datasetId) {
+			return;
+		}
+		try {
+			await fetch(`/api/datasets/${datasetId}/dashboard/cancel`, {
+				method: 'POST',
+				keepalive: true
+			});
+			if (!silent) {
+				setMessage('Cancelled dashboard processing.', 'info');
+			}
+		} catch (error) {
+			if (!silent) {
+				setMessage(toMessage(error), 'error');
+			}
+		} finally {
+			if (activeDashboardDatasetId === datasetId) {
+				activeDashboardDatasetId = '';
+			}
 		}
 	}
 
@@ -617,6 +660,7 @@
 	});
 
 	onDestroy(() => {
+		void cancelDashboard(activeDashboardDatasetId, true);
 		closeProgressSocket();
 	});
 </script>

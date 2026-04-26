@@ -418,7 +418,8 @@ class BackendServiceTest {
         DatasetRegistryService datasetRegistryService = mock(DatasetRegistryService.class);
         EmailAnalyticsService emailAnalyticsService = mock(EmailAnalyticsService.class);
         CsvAnalyticsService csvAnalyticsService = mock(CsvAnalyticsService.class);
-        DatasetAnalyticsService service = new DatasetAnalyticsService(datasetRegistryService, emailAnalyticsService, csvAnalyticsService);
+        DatasetProcessingStateService datasetProcessingStateService = new DatasetProcessingStateService();
+        DatasetAnalyticsService service = new DatasetAnalyticsService(datasetRegistryService, emailAnalyticsService, csvAnalyticsService, datasetProcessingStateService);
 
         UUID emailId = UUID.randomUUID();
         UUID csvId = UUID.randomUUID();

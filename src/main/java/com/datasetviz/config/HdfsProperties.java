@@ -72,6 +72,7 @@ public class HdfsProperties {
         private int nameNodePort;
         private boolean format;
         private boolean allowFormatExisting;
+        private File mirrorDir;
 
         public boolean isEnabled() {
             return enabled;
@@ -112,13 +113,20 @@ public class HdfsProperties {
         public void setFormat(boolean format) {
             this.format = format;
         }
-
         public boolean isAllowFormatExisting() {
             return allowFormatExisting;
         }
 
         public void setAllowFormatExisting(boolean allowFormatExisting) {
             this.allowFormatExisting = allowFormatExisting;
+        }
+
+        public File getMirrorDir() {
+            return mirrorDir;
+        }
+
+        public void setMirrorDir(File mirrorDir) {
+            this.mirrorDir = mirrorDir;
         }
     }
 }

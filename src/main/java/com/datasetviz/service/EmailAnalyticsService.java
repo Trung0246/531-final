@@ -43,13 +43,14 @@ public class EmailAnalyticsService {
     private final EmailArchiveParser emailArchiveParser;
     private final AnalyticsProperties analyticsProperties;
     private final DashboardProgressService dashboardProgressService;
+    private final DatasetProcessingStateService datasetProcessingStateService;
     private final ConcurrentMap<String, CachedSnapshot> cache = new ConcurrentHashMap<>();
 
     public EmailAnalyticsService(DatasetRegistryService datasetRegistryService,
                                   HdfsStorageService hdfsStorageService,
                                   EmailArchiveParser emailArchiveParser,
                                   AnalyticsProperties analyticsProperties) {
-        this(datasetRegistryService, hdfsStorageService, emailArchiveParser, analyticsProperties, new DashboardProgressService());
+        this(datasetRegistryService, hdfsStorageService, emailArchiveParser, analyticsProperties, new DashboardProgressService(), new DatasetProcessingStateService());
     }
 
     @Autowired
@@ -57,12 +58,14 @@ public class EmailAnalyticsService {
                                  HdfsStorageService hdfsStorageService,
                                  EmailArchiveParser emailArchiveParser,
                                  AnalyticsProperties analyticsProperties,
-                                 DashboardProgressService dashboardProgressService) {
+                                 DashboardProgressService dashboardProgressService,
+                                 DatasetProcessingStateService datasetProcessingStateService) {
         this.datasetRegistryService = datasetRegistryService;
         this.hdfsStorageService = hdfsStorageService;
         this.emailArchiveParser = emailArchiveParser;
         this.analyticsProperties = analyticsProperties;
         this.dashboardProgressService = dashboardProgressService;
+        this.datasetProcessingStateService = datasetProcessingStateService;
     }
 
     public EmailAnalyticsSnapshot analyze(UUID datasetId, Integer requestedMaxFiles, boolean refresh) throws IOException {
@@ -80,36 +83,48 @@ public class EmailAnalyticsService {
             return cachedSnapshot.snapshot();
         }
 
-        publish(datasetId, "starting", "Preparing email analytics.", 0, 0, 0, 0, false);
-        if (!hdfsStorageService.exists(dataset.getHdfsPath())) {
-            throw new IllegalArgumentException("HDFS path does not exist: " + dataset.getHdfsPath());
-        }
-
-        MutableAnalytics mutableAnalytics = new MutableAnalytics();
-        List<String> filePaths = hdfsStorageService.listFilePaths(dataset.getHdfsPath(), maxFiles);
-        publish(datasetId, "listed", "Found " + filePaths.size() + " file(s) to scan.", 0, filePaths.size(), 0, 0, false);
-        for (String filePath : filePaths) {
-            mutableAnalytics.incrementScannedFiles();
-            publishProgress(datasetId, "processing", "Scanning " + fileName(filePath), mutableAnalytics, filePaths.size(), false);
-            try (InputStream inputStream = hdfsStorageService.open(filePath)) {
-                EmailRecord record = emailArchiveParser.parse(inputStream, filePath).orElse(null);
-                if (record == null) {
-                    mutableAnalytics.incrementFailedFiles();
-                    publishProgress(datasetId, "warning", "Skipped " + fileName(filePath), mutableAnalytics, filePaths.size(), false);
-                    continue;
-                }
-                record.setMailboxOwner(PathUtils.deriveMailboxOwner(dataset.getHdfsPath(), filePath));
-                mutableAnalytics.accept(record);
-            } catch (Exception exception) {
-                mutableAnalytics.incrementFailedFiles();
-                publishProgress(datasetId, "warning", "Skipped " + fileName(filePath) + ": " + exception.getMessage(), mutableAnalytics, filePaths.size(), false);
+        DatasetProcessingStateService.ProcessingJob job = datasetProcessingStateService.beginJob(datasetId);
+        try {
+            publish(datasetId, "starting", "Preparing email analytics.", 0, 0, 0, 0, false);
+            if (!hdfsStorageService.exists(dataset.getHdfsPath())) {
+                throw new IllegalArgumentException("HDFS path does not exist: " + dataset.getHdfsPath());
             }
-        }
 
-        EmailAnalyticsSnapshot snapshot = mutableAnalytics.toSnapshot(dataset, maxFiles, Instant.now(), analyticsProperties);
-        cache.put(cacheKey, new CachedSnapshot(Instant.now(), snapshot));
-        publish(datasetId, "complete", "Dashboard analytics ready.", snapshot.getOverview().getScannedFiles(), filePaths.size(), snapshot.getOverview().getParsedEmails(), snapshot.getOverview().getFailedFiles(), true);
-        return snapshot;
+            MutableAnalytics mutableAnalytics = new MutableAnalytics();
+            List<String> filePaths = hdfsStorageService.listFilePaths(dataset.getHdfsPath(), maxFiles);
+            publish(datasetId, "listed", "Found " + filePaths.size() + " file(s) to scan.", 0, filePaths.size(), 0, 0, false);
+            for (String filePath : filePaths) {
+                job.throwIfCancelled();
+                mutableAnalytics.incrementScannedFiles();
+                publishProgress(datasetId, "processing", "Scanning " + fileName(filePath), mutableAnalytics, filePaths.size(), false);
+                try (DatasetProcessingStateService.FileLock ignored = datasetProcessingStateService.lockFile(datasetId, filePath);
+                     InputStream inputStream = hdfsStorageService.open(filePath)) {
+                    job.throwIfCancelled();
+                    EmailRecord record = emailArchiveParser.parse(inputStream, filePath).orElse(null);
+                    job.throwIfCancelled();
+                    if (record == null) {
+                        mutableAnalytics.incrementFailedFiles();
+                        publishProgress(datasetId, "warning", "Skipped " + fileName(filePath), mutableAnalytics, filePaths.size(), false);
+                        continue;
+                    }
+                    record.setMailboxOwner(PathUtils.deriveMailboxOwner(dataset.getHdfsPath(), filePath));
+                    mutableAnalytics.accept(record);
+                } catch (AnalyticsCancelledException exception) {
+                    publishProgress(datasetId, "cancelled", "Dashboard analytics cancelled.", mutableAnalytics, filePaths.size(), true);
+                    throw exception;
+                } catch (Exception exception) {
+                    mutableAnalytics.incrementFailedFiles();
+                    publishProgress(datasetId, "warning", "Skipped " + fileName(filePath) + ": " + exception.getMessage(), mutableAnalytics, filePaths.size(), false);
+                }
+            }
+
+            EmailAnalyticsSnapshot snapshot = mutableAnalytics.toSnapshot(dataset, maxFiles, Instant.now(), analyticsProperties);
+            cache.put(cacheKey, new CachedSnapshot(Instant.now(), snapshot));
+            publish(datasetId, "complete", "Dashboard analytics ready.", snapshot.getOverview().getScannedFiles(), filePaths.size(), snapshot.getOverview().getParsedEmails(), snapshot.getOverview().getFailedFiles(), true);
+            return snapshot;
+        } finally {
+            datasetProcessingStateService.finishJob(job);
+        }
     }
 
     private int resolveMaxFiles(Integer requestedMaxFiles) {

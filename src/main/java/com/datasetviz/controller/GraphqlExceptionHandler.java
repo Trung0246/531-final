@@ -1,5 +1,6 @@
 package com.datasetviz.controller;
 
+import com.datasetviz.service.AnalyticsCancelledException;
 import graphql.GraphQLError;
 import graphql.GraphqlErrorBuilder;
 import graphql.schema.DataFetchingEnvironment;
@@ -15,7 +16,7 @@ public class GraphqlExceptionHandler extends DataFetcherExceptionResolverAdapter
 
     @Override
     protected GraphQLError resolveToSingleError(Throwable exception, DataFetchingEnvironment environment) {
-        if (exception instanceof IllegalArgumentException) {
+        if (exception instanceof AnalyticsCancelledException || exception instanceof IllegalArgumentException) {
             return error(environment, ErrorType.BAD_REQUEST, exception.getMessage());
         }
         if (exception instanceof NoSuchElementException) {

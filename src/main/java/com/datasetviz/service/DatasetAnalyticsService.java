@@ -13,13 +13,16 @@ public class DatasetAnalyticsService {
     private final DatasetRegistryService datasetRegistryService;
     private final EmailAnalyticsService emailAnalyticsService;
     private final CsvAnalyticsService csvAnalyticsService;
+    private final DatasetProcessingStateService datasetProcessingStateService;
 
     public DatasetAnalyticsService(DatasetRegistryService datasetRegistryService,
                                    EmailAnalyticsService emailAnalyticsService,
-                                   CsvAnalyticsService csvAnalyticsService) {
+                                   CsvAnalyticsService csvAnalyticsService,
+                                   DatasetProcessingStateService datasetProcessingStateService) {
         this.datasetRegistryService = datasetRegistryService;
         this.emailAnalyticsService = emailAnalyticsService;
         this.csvAnalyticsService = csvAnalyticsService;
+        this.datasetProcessingStateService = datasetProcessingStateService;
     }
 
     public Object analyze(UUID datasetId, Integer requestedMaxFiles, boolean refresh) throws IOException {
@@ -41,5 +44,10 @@ public class DatasetAnalyticsService {
             case CSV_TEXT -> csvAnalyticsService.analyze(datasetId, requestedMaxFiles, requestedUpdateEveryRows, requestedFullDashboardUpdateEveryRows, refresh);
             default -> throw new IllegalArgumentException("Current analytics implementation supports EMAIL_ARCHIVE and CSV_TEXT datasets only.");
         };
+    }
+
+    public boolean cancel(UUID datasetId) {
+        datasetRegistryService.getRequired(datasetId);
+        return datasetProcessingStateService.cancelJob(datasetId);
     }
 }

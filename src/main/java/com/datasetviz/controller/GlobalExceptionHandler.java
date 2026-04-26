@@ -31,6 +31,14 @@ public class GlobalExceptionHandler {
         return detail;
     }
 
+    @ExceptionHandler(IllegalStateException.class)
+    public ProblemDetail handleConflict(IllegalStateException exception) {
+        ProblemDetail detail = ProblemDetail.forStatus(HttpStatus.CONFLICT);
+        detail.setTitle("Request conflicts with active processing");
+        detail.setDetail(exception.getMessage());
+        return detail;
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ProblemDetail handleValidation(MethodArgumentNotValidException exception) {
         String message = exception.getBindingResult()

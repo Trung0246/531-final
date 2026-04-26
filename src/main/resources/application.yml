@@ -39,6 +39,8 @@ app:
       format: ${APP_HDFS_EMBEDDED_FORMAT:false}
       # Must be true to format an existing embedded HDFS directory. Prevents accidental data loss on restart.
       allow-format-existing: ${APP_HDFS_EMBEDDED_ALLOW_FORMAT_EXISTING:false}
+      # Local durable mirror for embedded HDFS imports. Used to restore files if MiniDFSCluster test cleanup removes storage.
+      mirror-dir: ${APP_HDFS_EMBEDDED_MIRROR_DIR:.hdfs-mirror}
     configuration:
       dfs.client.use.datanode.hostname: ${APP_HDFS_USE_DATANODE_HOSTNAME:true}
   analytics:

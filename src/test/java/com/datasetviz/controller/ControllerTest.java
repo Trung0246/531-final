@@ -86,7 +86,7 @@ class ControllerTest {
         DatasetRegistryService datasetRegistryService = mock(DatasetRegistryService.class);
         DatasetImportService datasetImportService = mock(DatasetImportService.class);
         HdfsStorageService hdfsStorageService = mock(HdfsStorageService.class);
-        DatasetController controller = new DatasetController(datasetRegistryService, datasetImportService, hdfsStorageService);
+        DatasetController controller = new DatasetController(datasetRegistryService, datasetImportService, mock(DatasetAnalyticsService.class), hdfsStorageService);
 
         UUID datasetId = UUID.randomUUID();
         DatasetRegistration registration = new DatasetRegistration(datasetId, "dataset", "desc", DatasetType.EMAIL_ARCHIVE, "/path", Instant.now());
@@ -113,7 +113,7 @@ class ControllerTest {
 
     @Test
     void datasetControllerCreatesMissingHdfsPath() throws Exception {
-        DatasetController controller = new DatasetController(mock(DatasetRegistryService.class), mock(DatasetImportService.class), mock(HdfsStorageService.class));
+        DatasetController controller = new DatasetController(mock(DatasetRegistryService.class), mock(DatasetImportService.class), mock(DatasetAnalyticsService.class), mock(HdfsStorageService.class));
         RegisterDatasetRequest request = new RegisterDatasetRequest();
         request.setHdfsPath("/missing");
         when(controllerHdfs(controller).exists("/missing")).thenReturn(false);
