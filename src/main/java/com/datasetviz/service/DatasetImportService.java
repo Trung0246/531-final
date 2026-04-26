@@ -28,22 +28,25 @@ public class DatasetImportService {
     private final DatasetRegistryService datasetRegistryService;
     private final HdfsProperties hdfsProperties;
     private final DatasetProcessingStateService datasetProcessingStateService;
+    private final DatasetAnalyticsService datasetAnalyticsService;
 
     public DatasetImportService(HdfsStorageService hdfsStorageService,
-                                 DatasetRegistryService datasetRegistryService,
-                                 HdfsProperties hdfsProperties) {
-        this(hdfsStorageService, datasetRegistryService, hdfsProperties, new DatasetProcessingStateService());
+                                  DatasetRegistryService datasetRegistryService,
+                                  HdfsProperties hdfsProperties) {
+        this(hdfsStorageService, datasetRegistryService, hdfsProperties, new DatasetProcessingStateService(), null);
     }
 
     @Autowired
     public DatasetImportService(HdfsStorageService hdfsStorageService,
-                                DatasetRegistryService datasetRegistryService,
-                                HdfsProperties hdfsProperties,
-                                DatasetProcessingStateService datasetProcessingStateService) {
+                                 DatasetRegistryService datasetRegistryService,
+                                 HdfsProperties hdfsProperties,
+                                 DatasetProcessingStateService datasetProcessingStateService,
+                                 DatasetAnalyticsService datasetAnalyticsService) {
         this.hdfsStorageService = hdfsStorageService;
         this.datasetRegistryService = datasetRegistryService;
         this.hdfsProperties = hdfsProperties;
         this.datasetProcessingStateService = datasetProcessingStateService;
+        this.datasetAnalyticsService = datasetAnalyticsService;
     }
 
     public List<HdfsFileDescriptor> importLocalDirectory(ImportLocalDirectoryRequest request) throws IOException {
@@ -70,6 +73,8 @@ public class DatasetImportService {
             mirrorFile(file, targetPath);
             hdfsStorageService.copyLocalFileToHdfs(file, targetPath);
         }
+
+        invalidateAnalyticsCache(dataset.getId());
 
         return listDatasetFiles(dataset.getId(), 500);
     }
@@ -104,6 +109,8 @@ public class DatasetImportService {
             }
         }
 
+        invalidateAnalyticsCache(dataset.getId());
+
         return listDatasetFiles(dataset.getId(), 500);
     }
 
@@ -114,7 +121,17 @@ public class DatasetImportService {
             throw new IllegalStateException("File is currently being processed and cannot be deleted: " + targetPath);
         }
         deleteMirrorFile(targetPath);
-        return hdfsStorageService.delete(targetPath);
+        boolean deleted = hdfsStorageService.delete(targetPath);
+        if (deleted) {
+            invalidateAnalyticsCache(dataset.getId());
+        }
+        return deleted;
+    }
+
+    private void invalidateAnalyticsCache(UUID datasetId) {
+        if (datasetAnalyticsService != null) {
+            datasetAnalyticsService.invalidateCache(datasetId);
+        }
     }
 
     public List<HdfsFileDescriptor> listDatasetFiles(UUID datasetId, int limit) throws IOException {

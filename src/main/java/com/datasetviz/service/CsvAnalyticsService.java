@@ -130,6 +130,11 @@ public class CsvAnalyticsService {
         return analyze(datasetId, requestedMaxFiles, null, refresh);
     }
 
+    public void invalidateCache(UUID datasetId) {
+        String cacheKeyPrefix = datasetId + ":";
+        cache.keySet().removeIf(key -> key.startsWith(cacheKeyPrefix));
+    }
+
     public CsvAnalyticsSnapshot analyze(UUID datasetId, Integer requestedMaxFiles, Integer requestedUpdateEveryRows, boolean refresh) throws IOException {
         return analyze(datasetId, requestedMaxFiles, requestedUpdateEveryRows, null, refresh);
     }

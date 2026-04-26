@@ -12,6 +12,11 @@ public final class PathUtils {
             return null;
         }
         String normalized = value.trim().replace('\\', '/');
+        if (normalized.contains("://")) {
+            int authorityStart = normalized.indexOf("://") + 3;
+            int pathStart = normalized.indexOf('/', authorityStart);
+            normalized = pathStart >= 0 ? normalized.substring(pathStart) : "/";
+        }
         while (normalized.length() > 1 && normalized.endsWith("/")) {
             normalized = normalized.substring(0, normalized.length() - 1);
         }

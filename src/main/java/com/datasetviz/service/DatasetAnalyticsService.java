@@ -50,4 +50,9 @@ public class DatasetAnalyticsService {
         datasetRegistryService.getRequired(datasetId);
         return datasetProcessingStateService.cancelJob(datasetId);
     }
+
+    public void invalidateCache(UUID datasetId) {
+        emailAnalyticsService.invalidateCache(datasetId);
+        csvAnalyticsService.invalidateCache(datasetId);
+    }
 }

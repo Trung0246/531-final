@@ -127,6 +127,11 @@ public class EmailAnalyticsService {
         }
     }
 
+    public void invalidateCache(UUID datasetId) {
+        String cacheKeyPrefix = datasetId + ":";
+        cache.keySet().removeIf(key -> key.startsWith(cacheKeyPrefix));
+    }
+
     private int resolveMaxFiles(Integer requestedMaxFiles) {
         if (requestedMaxFiles == null || requestedMaxFiles < 1) {
             return analyticsProperties.getDefaultMaxFiles();

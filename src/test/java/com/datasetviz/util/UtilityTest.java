@@ -13,7 +13,10 @@ class UtilityTest {
         assertThat(PathUtils.normalizeHdfsPath(null)).isNull();
         assertThat(PathUtils.normalizeHdfsPath("/datasets/mail///")).isEqualTo("/datasets/mail");
         assertThat(PathUtils.normalizeHdfsPath("\\datasets\\mail\\")).isEqualTo("/datasets/mail");
+        assertThat(PathUtils.normalizeHdfsPath("hdfs://truenas.local:52000/data/covid/file.csv")).isEqualTo("/data/covid/file.csv");
+        assertThat(PathUtils.normalizeHdfsPath("hdfs://truenas.local:52000/data/covid/WHO COVID-19 cases.csv")).isEqualTo("/data/covid/WHO COVID-19 cases.csv");
         assertThat(PathUtils.resolveHdfsPath("/datasets/base/", "/child/file.txt")).isEqualTo("/datasets/base/child/file.txt");
+        assertThat(PathUtils.requireDatasetChildPath("/data/covid", "hdfs://truenas.local:52000/data/covid/file.csv")).isEqualTo("/data/covid/file.csv");
         assertThat(PathUtils.resolveHdfsPath("/", "child/file.txt")).isEqualTo("/child/file.txt");
         assertThat(PathUtils.deriveMailboxOwner("/datasets/mail", "/datasets/mail/john/sent/1")).isEqualTo("john");
         assertThat(PathUtils.deriveMailboxOwner("/datasets/mail", "/outside/file.txt")).isEqualTo("unknown");

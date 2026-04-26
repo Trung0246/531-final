@@ -99,7 +99,8 @@ class BackendServiceTest {
 
         HdfsStorageService hdfsStorageService = mock(HdfsStorageService.class);
         DatasetRegistryService datasetRegistryService = mock(DatasetRegistryService.class);
-        DatasetImportService service = new DatasetImportService(hdfsStorageService, datasetRegistryService, new HdfsProperties());
+        DatasetAnalyticsService datasetAnalyticsService = mock(DatasetAnalyticsService.class);
+        DatasetImportService service = new DatasetImportService(hdfsStorageService, datasetRegistryService, new HdfsProperties(), new DatasetProcessingStateService(), datasetAnalyticsService);
 
         UUID datasetId = UUID.randomUUID();
         DatasetRegistration registration = new DatasetRegistration(datasetId, "dataset", "description", DatasetType.CSV_TEXT, "/datasets/import", Instant.now());
@@ -120,6 +121,7 @@ class BackendServiceTest {
         assertThat(result).containsExactly(descriptor);
         verify(hdfsStorageService).createDirectories("/datasets/import");
         verify(hdfsStorageService).copyLocalFileToHdfs(file, "/datasets/import/nested/data.txt");
+        verify(datasetAnalyticsService).invalidateCache(datasetId);
     }
 
     @Test
@@ -139,7 +141,8 @@ class BackendServiceTest {
 
         HdfsStorageService hdfsStorageService = mock(HdfsStorageService.class);
         DatasetRegistryService datasetRegistryService = mock(DatasetRegistryService.class);
-        DatasetImportService service = new DatasetImportService(hdfsStorageService, datasetRegistryService, new HdfsProperties());
+        DatasetAnalyticsService datasetAnalyticsService = mock(DatasetAnalyticsService.class);
+        DatasetImportService service = new DatasetImportService(hdfsStorageService, datasetRegistryService, new HdfsProperties(), new DatasetProcessingStateService(), datasetAnalyticsService);
         UUID datasetId = UUID.randomUUID();
         DatasetRegistration registration = new DatasetRegistration(datasetId, "dataset", "", DatasetType.CSV_TEXT, "/datasets/import", Instant.now());
 
@@ -165,7 +168,8 @@ class BackendServiceTest {
     void datasetImportServiceImportsRemoteFilesAndDeletesDatasetFiles() throws Exception {
         HdfsStorageService hdfsStorageService = mock(HdfsStorageService.class);
         DatasetRegistryService datasetRegistryService = mock(DatasetRegistryService.class);
-        DatasetImportService service = new DatasetImportService(hdfsStorageService, datasetRegistryService, new HdfsProperties());
+        DatasetAnalyticsService datasetAnalyticsService = mock(DatasetAnalyticsService.class);
+        DatasetImportService service = new DatasetImportService(hdfsStorageService, datasetRegistryService, new HdfsProperties(), new DatasetProcessingStateService(), datasetAnalyticsService);
         UUID datasetId = UUID.randomUUID();
         DatasetRegistration registration = new DatasetRegistration(datasetId, "dataset", "", DatasetType.CSV_TEXT, "/datasets/import", Instant.now());
         HdfsFileDescriptor descriptor = new HdfsFileDescriptor("/datasets/import/uploads/data.csv", "data.csv", false, 5L, Instant.now());
@@ -186,6 +190,7 @@ class BackendServiceTest {
         assertThatThrownBy(() -> service.deleteDatasetFile(datasetId, "/datasets/import"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("under dataset root");
+        verify(datasetAnalyticsService, times(2)).invalidateCache(datasetId);
     }
 
     @Test

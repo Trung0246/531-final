@@ -120,6 +120,7 @@
 	let progressFiles = $state<DashboardProgressEvent['files']>([]);
 	let progressSocket: WebSocket | null = null;
 	let lastChartShellUpdate = 0;
+	let hasLivePartialDashboard = $state(false);
 	let activeDashboardDatasetId = '';
 	let dashboardRequestSequence = 0;
 	let form = $state<RegisterDatasetInput>({
@@ -149,6 +150,16 @@
 
 	function toMessage(error: unknown) {
 		return error instanceof Error ? error.message : 'Unexpected error';
+	}
+
+	function normalizeHdfsPath(path: string) {
+		const normalized = path.trim().replaceAll('\\', '/');
+		const schemeIndex = normalized.indexOf('://');
+		if (schemeIndex < 0) {
+			return normalized;
+		}
+		const pathStart = normalized.indexOf('/', schemeIndex + 3);
+		return pathStart >= 0 ? normalized.slice(pathStart) : '/';
 	}
 
 	function storedPositiveInt(key: string, fallback: number): number {
@@ -195,6 +206,7 @@
 		progressProcessedRows = 0;
 		progressFailedFiles = 0;
 		progressFiles = [];
+		hasLivePartialDashboard = false;
 	}
 
 	function summaryInt(label: string): number {
@@ -241,6 +253,9 @@
 
 		applyProgressSummary(progress);
 		dashboardProgress = { ...progress, charts: [], dashboard: null };
+		if (progress.dashboard || progress.charts?.length) {
+			hasLivePartialDashboard = true;
+		}
 
 		if (progress.dashboard) {
 			dashboard = progress.dashboard;
@@ -630,7 +645,8 @@
 		isDeleting = true;
 		setMessage('Deleting dataset file...', 'info');
 		try {
-			await restRequest<void>(`/api/datasets/${selectedDatasetId}/files?path=${encodeURIComponent(path)}`, {
+			const normalizedPath = normalizeHdfsPath(path);
+			await restRequest<void>(`/api/datasets/${selectedDatasetId}/files?path=${encodeURIComponent(normalizedPath)}`, {
 				method: 'DELETE'
 			});
 			deleteFilePath = '';
@@ -882,7 +898,7 @@
 							{progressScannedFiles}/{progressTotalFiles} files · {progressProcessedRows} rows · {progressFailedFiles} failed
 						</span>
 					</div>
-					{#if dashboardProgress?.dashboard}
+					{#if hasLivePartialDashboard && !dashboardProgress?.complete}
 						<div class="stream-note">Charts and previews below are live partial results and will continue updating until the scan completes.</div>
 					{/if}
 					{#if progressFiles.length}
