@@ -60,6 +60,9 @@ public class CsvAnalyticsService {
 
     private static final int SCHEMA_SAMPLE_SIZE = 100;
     private static final int COLUMN_SAMPLE_LIMIT = 10;
+    private static final int COLUMN_TOP_VALUE_LIMIT = 10;
+    private static final int COLUMN_HISTOGRAM_BUCKETS = 8;
+    private static final int COLUMN_NUMERIC_SAMPLE_LIMIT = 10_000;
     private static final int ROW_PROGRESS_INTERVAL = 25_000;
     private static final int MIN_ROW_PROGRESS_INTERVAL = 50;
     private static final int MAX_ROW_PROGRESS_INTERVAL = 1_000_000;
@@ -619,9 +622,8 @@ public class CsvAnalyticsService {
             processedRows++;
 
             for (String header : schema.headers()) {
-                if (record.isMapped(header)) {
-                    columnAccumulators.computeIfAbsent(header, ColumnAccumulator::new).accept(record.get(header));
-                }
+                columnAccumulators.computeIfAbsent(header, ColumnAccumulator::new)
+                        .accept(record.isMapped(header) ? record.get(header) : null);
             }
 
             LocalDate observationDate = schema.dateColumn() == null || !record.isMapped(schema.dateColumn())
@@ -815,6 +817,9 @@ public class CsvAnalyticsService {
     private static final class ColumnAccumulator {
         private final String name;
         private final List<String> sampleValues = new ArrayList<>();
+        private final Map<String, Long> valueCounts = new LinkedHashMap<>();
+        private final List<Long> numericSamples = new ArrayList<>();
+        private int blankValues;
         private int nonBlankValues;
         private int numericValues;
         private int dateValues;
@@ -825,13 +830,19 @@ public class CsvAnalyticsService {
 
         private void accept(String rawValue) {
             if (rawValue == null || rawValue.isBlank()) {
+                blankValues++;
                 return;
             }
 
             String value = rawValue.trim();
             nonBlankValues++;
-            if (parseCsvNumber(value).isPresent()) {
+            valueCounts.merge(value, 1L, Long::sum);
+            Long numericValue = parseCsvNumber(value).orElse(null);
+            if (numericValue != null) {
                 numericValues++;
+                if (numericSamples.size() < COLUMN_NUMERIC_SAMPLE_LIMIT) {
+                    numericSamples.add(numericValue);
+                }
             }
             if (parseCsvDate(value).isPresent()) {
                 dateValues++;
@@ -842,7 +853,51 @@ public class CsvAnalyticsService {
         }
 
         private ColumnProfile toProfile() {
-            return new ColumnProfile(name, inferredType(), List.copyOf(sampleValues));
+            return new ColumnProfile(
+                    name,
+                    inferredType(),
+                    List.copyOf(sampleValues),
+                    blankValues,
+                    nonBlankValues,
+                    valueCounts.size(),
+                    topValues(),
+                    histogramBuckets()
+            );
+        }
+
+        private List<NamedCount> topValues() {
+            return valueCounts.entrySet().stream()
+                    .sorted(Map.Entry.<String, Long>comparingByValue().reversed().thenComparing(Map.Entry.comparingByKey()))
+                    .limit(COLUMN_TOP_VALUE_LIMIT)
+                    .map(entry -> new NamedCount(entry.getKey(), entry.getValue()))
+                    .toList();
+        }
+
+        private List<NamedCount> histogramBuckets() {
+            if (numericSamples.isEmpty() || numericValues != nonBlankValues) {
+                return List.of();
+            }
+            long min = numericSamples.stream().mapToLong(Long::longValue).min().orElse(0L);
+            long max = numericSamples.stream().mapToLong(Long::longValue).max().orElse(0L);
+            if (min == max) {
+                return List.of(new NamedCount(String.valueOf(min), numericSamples.size()));
+            }
+
+            int bucketCount = Math.min(COLUMN_HISTOGRAM_BUCKETS, Math.max(1, numericSamples.size()));
+            long[] counts = new long[bucketCount];
+            double width = (max - min) / (double) bucketCount;
+            for (Long value : numericSamples) {
+                int index = (int) Math.floor((value - min) / width);
+                counts[Math.min(bucketCount - 1, Math.max(0, index))]++;
+            }
+
+            List<NamedCount> buckets = new ArrayList<>();
+            for (int index = 0; index < bucketCount; index++) {
+                long start = Math.round(min + width * index);
+                long end = index == bucketCount - 1 ? max : Math.round(min + width * (index + 1));
+                buckets.add(new NamedCount(start == end ? String.valueOf(start) : start + "-" + end, counts[index]));
+            }
+            return buckets;
         }
 
         private String inferredType() {

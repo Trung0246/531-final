@@ -1,5 +1,5 @@
 export type DatasetType = 'EMAIL_ARCHIVE' | 'CSV_TEXT' | 'GENERIC_FILES';
-export type ChartMode = 'BAR' | 'LINE' | 'TABLE';
+export type ChartMode = 'BAR' | 'LINE' | 'TABLE' | 'HISTOGRAM' | 'DONUT' | 'MISSINGNESS';
 
 export interface DatasetView {
 	id: string;
@@ -31,12 +31,19 @@ export interface DashboardChart {
 	title: string;
 	type: ChartMode;
 	series: DashboardSeries[];
+	availableModes: ChartMode[];
+	semanticType: string | null;
 }
 
 export interface DashboardColumnProfile {
 	name: string;
 	type: string;
 	sampleValues: string[];
+	blankCount: number;
+	nonBlankCount: number;
+	distinctCount: number;
+	topValues: DashboardPoint[];
+	histogramBuckets: DashboardPoint[];
 }
 
 export interface DashboardListPanel {

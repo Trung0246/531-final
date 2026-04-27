@@ -53,6 +53,8 @@ type DashboardChart {
   title: String!
   type: String!
   series: [DashboardSeries!]!
+  availableModes: [String!]!
+  semanticType: String
 }
 
 type DashboardSeries {
@@ -69,6 +71,11 @@ type DashboardColumnProfile {
   name: String!
   type: String!
   sampleValues: [String!]!
+  blankCount: Int!
+  nonBlankCount: Int!
+  distinctCount: Int!
+  topValues: [DashboardPoint!]!
+  histogramBuckets: [DashboardPoint!]!
 }
 
 type DashboardListPanel {

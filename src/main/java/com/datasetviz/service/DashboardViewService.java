@@ -96,10 +96,10 @@ public class DashboardViewService {
 
     private List<DashboardView.Chart> emailCharts(EmailAnalyticsSnapshot snapshot) {
         return List.of(
-                chart("volume-by-month", "Email volume by month", "BAR", List.of(seriesFromBuckets("Count", snapshot.getVolumeByMonth()))),
-                chart("top-senders", "Top senders", "BAR", List.of(seriesFromPoints("Count", toPoints(snapshot.getTopSenders())))),
-                chart("top-recipients", "Top recipients", "BAR", List.of(seriesFromPoints("Count", toPoints(snapshot.getTopRecipients())))),
-                chart("hourly-distribution", "Hourly distribution (UTC)", "LINE", List.of(seriesFromBuckets("Count", snapshot.getHourlyDistribution())))
+                chart("volume-by-month", "Email volume by month", "BAR", List.of(seriesFromBuckets("Count", snapshot.getVolumeByMonth())), List.of("BAR", "LINE", "TABLE"), "DATE"),
+                chart("top-senders", "Top senders", "BAR", List.of(seriesFromPoints("Count", toPoints(snapshot.getTopSenders()))), List.of("BAR", "DONUT", "TABLE"), "CATEGORICAL"),
+                chart("top-recipients", "Top recipients", "BAR", List.of(seriesFromPoints("Count", toPoints(snapshot.getTopRecipients()))), List.of("BAR", "DONUT", "TABLE"), "CATEGORICAL"),
+                chart("hourly-distribution", "Hourly distribution (UTC)", "LINE", List.of(seriesFromBuckets("Count", snapshot.getHourlyDistribution())), List.of("LINE", "BAR", "TABLE"), "DATE")
         );
     }
 
@@ -146,23 +146,82 @@ public class DashboardViewService {
         List<NamedCount> primaryBreakdown = topLocationBreakdowns.isEmpty() ? List.of() : topLocationBreakdowns.get(0).getItems();
         List<MetricSeries> metricSeries = snapshot.getMetricTimeSeries() == null ? List.of() : snapshot.getMetricTimeSeries().stream().limit(3).toList();
 
-        return List.of(
-                chart("rows-by-date", "Rows by observation date", "LINE", List.of(seriesFromBuckets("Rows", snapshot.getRowsByDate()))),
-                chart("metric-totals", "Latest metric totals", "BAR", List.of(seriesFromPoints("Count", toPoints(snapshot.getMetricTotals())))),
-                chart(
+        List<DashboardView.Chart> charts = new ArrayList<>();
+        charts.add(chart("rows-by-date", "Rows by observation date", "LINE", List.of(seriesFromBuckets("Rows", snapshot.getRowsByDate())), List.of("LINE", "BAR", "TABLE"), "DATE"));
+        charts.add(chart("metric-totals", "Latest metric totals", "BAR", List.of(seriesFromPoints("Count", toPoints(snapshot.getMetricTotals()))), List.of("BAR", "DONUT", "TABLE"), "NUMERIC"));
+        charts.add(chart(
                         "top-locations",
                         topLocationBreakdowns.isEmpty() ? "Top locations" : "Top locations by " + topLocationBreakdowns.get(0).getName(),
                         "BAR",
-                        List.of(seriesFromPoints("Count", toPoints(primaryBreakdown)))
-                ),
-                chart("metric-trends", "Metric trends over time", "LINE", metricSeries.stream().map(this::series).toList())
-        );
+                        List.of(seriesFromPoints("Count", toPoints(primaryBreakdown))),
+                        List.of("BAR", "DONUT", "TABLE"),
+                        "CATEGORICAL"
+                ));
+        charts.add(chart("metric-trends", "Metric trends over time", "LINE", metricSeries.stream().map(this::series).toList(), List.of("LINE", "TABLE"), "DATE"));
+        charts.addAll(columnCharts(snapshot.getColumnProfiles()));
+        return charts;
     }
 
     private List<DashboardView.ColumnPreview> toColumnPreviews(List<ColumnProfile> columnProfiles) {
         return columnProfiles == null ? List.of() : columnProfiles.stream()
-                .map(profile -> new DashboardView.ColumnPreview(profile.getName(), profile.getType(), profile.getSampleValues()))
+                .map(profile -> new DashboardView.ColumnPreview(
+                        profile.getName(),
+                        profile.getType(),
+                        profile.getSampleValues(),
+                        profile.getBlankCount(),
+                        profile.getNonBlankCount(),
+                        profile.getDistinctCount(),
+                        toPoints(profile.getTopValues()),
+                        toPoints(profile.getHistogramBuckets())
+                ))
                 .toList();
+    }
+
+    private List<DashboardView.Chart> columnCharts(List<ColumnProfile> columnProfiles) {
+        if (columnProfiles == null || columnProfiles.isEmpty()) {
+            return List.of();
+        }
+
+        List<DashboardView.Chart> charts = new ArrayList<>();
+        charts.add(chart(
+                "column-completeness",
+                "Column completeness",
+                "MISSINGNESS",
+                List.of(
+                        new DashboardView.Series("Non-blank", columnProfiles.stream().map(profile -> new DashboardView.Point(profile.getName(), profile.getNonBlankCount())).toList()),
+                        new DashboardView.Series("Blank", columnProfiles.stream().map(profile -> new DashboardView.Point(profile.getName(), profile.getBlankCount())).toList())
+                ),
+                List.of("MISSINGNESS", "BAR", "TABLE"),
+                "MISSINGNESS"
+        ));
+
+        columnProfiles.stream()
+                .filter(profile -> "NUMBER".equals(profile.getType()) && profile.getHistogramBuckets() != null && !profile.getHistogramBuckets().isEmpty())
+                .limit(4)
+                .map(profile -> chart(
+                        "column-" + slug(profile.getName()) + "-distribution",
+                        "Distribution: " + profile.getName(),
+                        "HISTOGRAM",
+                        List.of(seriesFromPoints("Rows", toPoints(profile.getHistogramBuckets()))),
+                        List.of("HISTOGRAM", "BAR", "TABLE"),
+                        "NUMERIC"
+                ))
+                .forEach(charts::add);
+
+        columnProfiles.stream()
+                .filter(profile -> !"NUMBER".equals(profile.getType()) && profile.getTopValues() != null && !profile.getTopValues().isEmpty())
+                .limit(4)
+                .map(profile -> chart(
+                        "column-" + slug(profile.getName()) + "-top-values",
+                        "Top values: " + profile.getName(),
+                        "BAR",
+                        List.of(seriesFromPoints("Rows", toPoints(profile.getTopValues()))),
+                        List.of("BAR", "DONUT", "TABLE"),
+                        profile.getType()
+                ))
+                .forEach(charts::add);
+
+        return charts;
     }
 
     private List<String> buildCsvListItems(CsvAnalyticsOverview overview, List<NamedCount> metricTotals) {
@@ -208,7 +267,11 @@ public class DashboardViewService {
     }
 
     private DashboardView.Chart chart(String id, String title, String type, List<DashboardView.Series> series) {
-        return new DashboardView.Chart(id, title, type, series);
+        return chart(id, title, type, series, List.of(type, "TABLE"), null);
+    }
+
+    private DashboardView.Chart chart(String id, String title, String type, List<DashboardView.Series> series, List<String> availableModes, String semanticType) {
+        return new DashboardView.Chart(id, title, type, series, availableModes, semanticType);
     }
 
     private DashboardView.Series seriesFromBuckets(String name, List<TimeSeriesPoint> points) {
@@ -231,6 +294,11 @@ public class DashboardViewService {
         return items == null ? List.of() : items.stream()
                 .map(item -> new DashboardView.Point(item.getName(), item.getCount()))
                 .toList();
+    }
+
+    private String slug(String value) {
+        String slug = value == null ? "column" : value.toLowerCase().replaceAll("[^a-z0-9]+", "-").replaceAll("(^-|-$)", "");
+        return slug.isBlank() ? "column" : slug;
     }
 
     private DashboardView.SummaryItem summaryItem(String label, Object value) {

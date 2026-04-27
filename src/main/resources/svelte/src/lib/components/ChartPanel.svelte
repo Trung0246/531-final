@@ -14,6 +14,8 @@
 	let chartData = $derived(toChartData(currentChart));
 	let hasRenderableData = $derived(currentChart.series.length > 0 && chartLabels.length > 0);
 	let maxValue = $derived(Math.max(1, ...chartData.map((point) => point.value)));
+	let donutPoints = $derived<DashboardPoint[]>(currentChart.series[0]?.points ?? []);
+	let donutTotal = $derived(donutPoints.reduce((total: number, point: DashboardPoint) => total + Math.max(0, point.value), 0));
 
 	const width = 640;
 	const height = 280;
@@ -99,6 +101,41 @@
 		return chartLabels.filter((_, index) => index % step === 0);
 	}
 
+	function polarToCartesian(centerX: number, centerY: number, radius: number, angle: number) {
+		const radians = ((angle - 90) * Math.PI) / 180;
+		return {
+			x: centerX + radius * Math.cos(radians),
+			y: centerY + radius * Math.sin(radians)
+		};
+	}
+
+	function donutArc(startAngle: number, endAngle: number): string {
+		const centerX = width / 2;
+		const centerY = height / 2;
+		const outerRadius = 105;
+		const innerRadius = 58;
+		const outerStart = polarToCartesian(centerX, centerY, outerRadius, endAngle);
+		const outerEnd = polarToCartesian(centerX, centerY, outerRadius, startAngle);
+		const innerStart = polarToCartesian(centerX, centerY, innerRadius, startAngle);
+		const innerEnd = polarToCartesian(centerX, centerY, innerRadius, endAngle);
+		const largeArc = endAngle - startAngle <= 180 ? '0' : '1';
+
+		return [
+			`M ${outerStart.x} ${outerStart.y}`,
+			`A ${outerRadius} ${outerRadius} 0 ${largeArc} 0 ${outerEnd.x} ${outerEnd.y}`,
+			`L ${innerStart.x} ${innerStart.y}`,
+			`A ${innerRadius} ${innerRadius} 0 ${largeArc} 1 ${innerEnd.x} ${innerEnd.y}`,
+			'Z'
+		].join(' ');
+	}
+
+	function donutStart(index: number): number {
+		if (donutTotal <= 0) {
+			return 0;
+		}
+		return donutPoints.slice(0, index).reduce((total: number, point: DashboardPoint) => total + Math.max(0, point.value), 0) / donutTotal * 360;
+	}
+
 	function vegaData(input: DashboardChart) {
 		return input.series.flatMap((series) =>
 			series.points.map((point) => ({
@@ -163,7 +200,7 @@
 		const host = vegaHost;
 		const selectedMode = renderMode;
 		const selectedChart = currentChart;
-		if (!useVega || !host || selectedMode === 'TABLE' || !chartHasData(selectedChart)) {
+		if (!useVega || !host || selectedMode === 'TABLE' || selectedMode === 'DONUT' || !chartHasData(selectedChart)) {
 			vegaView?.finalize();
 			vegaView = null;
 			return;
@@ -250,6 +287,27 @@
 		{/if}
 	{:else if !hasRenderableData}
 		<div class="empty-chart">No chart data available.</div>
+	{:else if renderMode === 'DONUT'}
+		<svg class="chart-svg donut-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={chart.title}>
+			{#if donutTotal <= 0}
+				<text class="axis-label" x={width / 2} y={height / 2} text-anchor="middle">No positive values</text>
+			{:else}
+				{#each donutPoints as point, index}
+					{@const startAngle = donutStart(index)}
+					{@const endAngle = startAngle + (Math.max(0, point.value) / donutTotal) * 360}
+					<path d={donutArc(startAngle, endAngle)} fill={palette[index % palette.length]}>
+						<title>{point.label}: {point.value}</title>
+					</path>
+				{/each}
+				<text class="donut-total" x={width / 2} y={height / 2 - 4} text-anchor="middle">{donutTotal}</text>
+				<text class="axis-label" x={width / 2} y={height / 2 + 18} text-anchor="middle">total</text>
+			{/if}
+		</svg>
+		<div class="legend-grid">
+			{#each donutPoints.slice(0, 8) as point, index}
+				<span><i style={`background: ${palette[index % palette.length]}`}></i>{point.label}</span>
+			{/each}
+		</div>
 	{:else if useVega}
 		<div bind:this={vegaHost} class="vega-host"></div>
 	{:else}
@@ -338,6 +396,38 @@
 		stroke-width: 3;
 		stroke-linejoin: round;
 		stroke-linecap: round;
+	}
+
+	.donut-svg path {
+		stroke: #111827;
+		stroke-width: 2;
+	}
+
+	.donut-total {
+		fill: #f8fbff;
+		font-size: 1.45rem;
+		font-weight: 700;
+	}
+
+	.legend-grid {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem 0.85rem;
+		color: #c8d3f2;
+		font-size: 0.78rem;
+	}
+
+	.legend-grid span {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+	}
+
+	.legend-grid i {
+		display: inline-block;
+		width: 0.65rem;
+		height: 0.65rem;
+		border-radius: 999px;
 	}
 
 	.empty-chart {

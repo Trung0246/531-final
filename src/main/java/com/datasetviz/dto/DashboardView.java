@@ -21,7 +21,11 @@ public record DashboardView(
     public record SummaryItem(String label, String value) {
     }
 
-    public record Chart(String id, String title, String type, List<Series> series) {
+    public record Chart(String id, String title, String type, List<Series> series, List<String> availableModes, String semanticType) {
+
+        public Chart(String id, String title, String type, List<Series> series) {
+            this(id, title, type, series, List.of(type, "TABLE"), null);
+        }
     }
 
     public record Series(String name, List<Point> points) {
@@ -30,7 +34,14 @@ public record DashboardView(
     public record Point(String label, double value) {
     }
 
-    public record ColumnPreview(String name, String type, List<String> sampleValues) {
+    public record ColumnPreview(String name,
+                                String type,
+                                List<String> sampleValues,
+                                int blankCount,
+                                int nonBlankCount,
+                                int distinctCount,
+                                List<Point> topValues,
+                                List<Point> histogramBuckets) {
     }
 
     public record ListPanel(String title, List<String> items) {

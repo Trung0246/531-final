@@ -320,8 +320,9 @@ class BackendServiceTest {
         DashboardView dashboard = service.toDashboardView(snapshot);
 
         assertThat(dashboard.datasetType()).isEqualTo(DatasetType.CSV_TEXT);
-        assertThat(dashboard.charts()).hasSize(4);
+        assertThat(dashboard.charts()).hasSizeGreaterThanOrEqualTo(4);
         assertThat(dashboard.charts().get(3).series()).extracting(DashboardView.Series::name).containsExactly("Confirmed", "Recovered");
+        assertThat(dashboard.charts()).extracting(DashboardView.Chart::type).contains("MISSINGNESS");
         assertThat(dashboard.listPanel().items()).contains("Metric: Confirmed", "Recovered: 30");
         assertThat(dashboard.columnProfiles()).singleElement()
                 .extracting(DashboardView.ColumnPreview::name, DashboardView.ColumnPreview::type)

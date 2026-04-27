@@ -44,6 +44,8 @@
 					id
 					title
 					type
+					availableModes
+					semanticType
 					series {
 						name
 						points {
@@ -56,6 +58,17 @@
 					name
 					type
 					sampleValues
+					blankCount
+					nonBlankCount
+					distinctCount
+					topValues {
+						label
+						value
+					}
+					histogramBuckets {
+						label
+						value
+					}
 				}
 				listPanel {
 					title
@@ -86,7 +99,7 @@
 		}
 	`;
 
-	const chartModes: ChartMode[] = ['BAR', 'LINE', 'TABLE'];
+	const chartModes: ChartMode[] = ['BAR', 'LINE', 'TABLE', 'HISTOGRAM', 'DONUT', 'MISSINGNESS'];
 	const focusValueLimit = 40;
 	const selectedDatasetStorageKey = 'datasetviz:selectedDatasetId';
 	const updateEveryRowsStorageKey = 'datasetviz:updateEveryRows';
@@ -359,6 +372,10 @@
 		}
 	}
 
+	function availableChartModes(chart: DashboardChart): ChartMode[] {
+		return chart.availableModes?.length ? chart.availableModes : chartModes;
+	}
+
 	function toggleChartValue(chart: DashboardChart, value: string) {
 		const available = selectableValues(chart);
 		if (available.length === 0) {
@@ -376,7 +393,9 @@
 	}
 
 	function resolvedChart(chart: DashboardChart): DashboardChart {
-		const type = chartTypeOverrides[chart.id] ?? chart.type;
+		const modes = availableChartModes(chart);
+		const requestedType = chartTypeOverrides[chart.id] ?? chart.type;
+		const type = modes.includes(requestedType) ? requestedType : chart.type;
 
 		if (chart.series.length > 1) {
 			const focusedValues = new Set(selectedValues(chart));
@@ -944,7 +963,7 @@
 						<article class="column-preview-card">
 							<div>
 								<strong>{column.name}</strong>
-								<span>{column.type}</span>
+								<span>{column.type} · {column.nonBlankCount} filled · {column.blankCount} blank · {column.distinctCount} distinct</span>
 							</div>
 							{#if column.sampleValues.length > 0}
 								<ol>
@@ -964,13 +983,14 @@
 		<section class="chart-grid">
 			{#each dashboard.charts as chart (`${chart.id}:${chartTypeOverrides[chart.id] ?? chart.type}`)}
 				{@const focusValues = selectableValues(chart)}
+				{@const modes = availableChartModes(chart)}
 				{@const displayChart = resolvedChart(chart)}
 				<article class="panel chart-card">
 					<div class="chart-tools">
 						<label>
 							<span>Visualization</span>
 							<select value={chartTypeOverrides[chart.id] ?? chart.type} onchange={(event: Event) => handleChartTypeChange(chart.id, event)}>
-								{#each chartModes as mode}
+								{#each modes as mode}
 									<option value={mode}>{mode}</option>
 								{/each}
 							</select>
