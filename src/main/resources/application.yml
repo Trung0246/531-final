@@ -1,0 +1,51 @@
+spring:
+  application:
+    name: hdfs-dataset-visualization-service
+  servlet:
+    multipart:
+      max-file-size: ${SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE:5GB}
+      max-request-size: ${SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE:6GB}
+
+server:
+  address: ${SERVER_ADDRESS:0.0.0.0}
+  port: ${SERVER_PORT:8080}
+  tomcat:
+    max-swallow-size: ${SERVER_TOMCAT_MAX_SWALLOW_SIZE:6GB}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+app:
+  registry:
+    path: ${APP_REGISTRY_PATH:.dataset.json}
+  hdfs:
+    uri: ${APP_HDFS_URI:hdfs://localhost:9000}
+    user: ${APP_HDFS_USER:}
+    # Optional HDFS destination prefix for imported files, e.g. /datasets/uploads.
+    # This is an HDFS path, not a local filesystem path.
+    hdfs-path: ${APP_HDFS_HDFS_PATH:}
+    # Optional allowed local root for import requests, e.g. /srv/datasets or C:/data.
+    # localDirectory must stay under this local filesystem path.
+    local-path: ${APP_HDFS_LOCAL_PATH:}
+    embedded:
+      enabled: ${APP_HDFS_EMBEDDED_ENABLED:false}
+      base-dir: ${APP_HDFS_EMBEDDED_BASE_DIR:.tmp/datasetviz-hdfs}
+      data-nodes: ${APP_HDFS_EMBEDDED_DATA_NODES:1}
+      name-node-port: ${APP_HDFS_EMBEDDED_NAME_NODE_PORT:0}
+      # False preserves embedded HDFS across restarts; first startup still formats if storage is missing.
+      format: ${APP_HDFS_EMBEDDED_FORMAT:false}
+      # Must be true to format an existing embedded HDFS directory. Prevents accidental data loss on restart.
+      allow-format-existing: ${APP_HDFS_EMBEDDED_ALLOW_FORMAT_EXISTING:false}
+      # Local durable mirror for embedded HDFS imports. Used to restore files if MiniDFSCluster test cleanup removes storage.
+      mirror-dir: ${APP_HDFS_EMBEDDED_MIRROR_DIR:.hdfs-mirror}
+    configuration:
+      dfs.client.use.datanode.hostname: ${APP_HDFS_USE_DATANODE_HOSTNAME:true}
+  analytics:
+    default-max-files: ${APP_ANALYTICS_DEFAULT_MAX_FILES:5000}
+    max-files-hard-limit: ${APP_ANALYTICS_MAX_FILES_HARD_LIMIT:20000}
+    cache-ttl: ${APP_ANALYTICS_CACHE_TTL:PT10M}
+    default-top-limit: ${APP_ANALYTICS_DEFAULT_TOP_LIMIT:10}
+    default-graph-edge-limit: ${APP_ANALYTICS_DEFAULT_GRAPH_EDGE_LIMIT:50}

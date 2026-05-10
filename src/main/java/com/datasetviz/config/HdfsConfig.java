@@ -1,0 +1,108 @@
+package com.datasetviz.config;
+
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.hdfs.MiniDFSCluster;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.DisposableBean;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.util.StringUtils;
+
+import java.io.File;
+import java.io.IOException;
+import java.net.URI;
+import java.nio.file.Files;
+
+@Configuration
+@EnableConfigurationProperties({HdfsProps.class, AnalyticsProps.class, RegistryProps.class})
+public class HdfsConfig {
+
+    @Bean
+    public org.apache.hadoop.conf.Configuration hadoopConfiguration(HdfsProps properties) {
+        org.apache.hadoop.conf.Configuration configuration = new org.apache.hadoop.conf.Configuration();
+        if (!properties.getEmbedded().isEnabled()) {
+            configuration.set("fs.defaultFS", properties.getUri());
+        }
+        properties.getConfiguration().forEach(configuration::set);
+        return configuration;
+    }
+
+    @Bean(destroyMethod = "")
+    public MiniDFSCluster miniDfsCluster(org.apache.hadoop.conf.Configuration configuration,
+                                          HdfsProps properties) throws IOException {
+        if (!properties.getEmbedded().isEnabled()) {
+            return null;
+        }
+
+        File baseDir = properties.getEmbedded().getBaseDir();
+        if (baseDir == null) {
+            baseDir = new File(".tmp", "datasetviz-hdfs");
+        }
+        Files.createDirectories(baseDir.toPath());
+
+        File nameNodeDir = new File(baseDir, "namenode");
+        File dataNodeDir = new File(baseDir, "datanode");
+        boolean existingNameNode = new File(nameNodeDir, "current").exists();
+        if (properties.getEmbedded().isFormat() && existingNameNode && !properties.getEmbedded().isAllowFormatExisting()) {
+            throw new IllegalStateException("Refusing to format existing embedded HDFS storage at " + baseDir.getAbsolutePath()
+                    + ". Set app.hdfs.embedded.allow-format-existing=true only when intentional data deletion is required.");
+        }
+        configuration.set(MiniDFSCluster.HDFS_MINIDFS_BASEDIR, baseDir.getAbsolutePath());
+        configuration.set("dfs.namenode.name.dir", nameNodeDir.toURI().toString());
+        configuration.set("dfs.datanode.data.dir", dataNodeDir.toURI().toString());
+        configuration.set("dfs.namenode.rpc-bind-host", "0.0.0.0");
+        configuration.set("dfs.namenode.http-bind-host", "0.0.0.0");
+
+        MiniDFSCluster.Builder builder = new MiniDFSCluster.Builder(configuration)
+                .nameNodeHttpPort(0)
+                .numDataNodes(Math.max(1, properties.getEmbedded().getDataNodes()))
+                .checkExitOnShutdown(false)
+                .format(properties.getEmbedded().isFormat() || !existingNameNode);
+        if (properties.getEmbedded().getNameNodePort() > 0) {
+            builder.nameNodePort(properties.getEmbedded().getNameNodePort());
+        }
+
+        MiniDFSCluster cluster = builder.build();
+        cluster.waitClusterUp();
+        configuration.set("fs.defaultFS", cluster.getFileSystem().getUri().toString());
+        return cluster;
+    }
+
+    @Bean
+    public DisposableBean miniDfsClusterShutdown(ObjectProvider<MiniDFSCluster> miniDfsClusterProvider,
+                                                 ObjectProvider<FileSystem> fileSystemProvider) {
+        return () -> {
+            MiniDFSCluster cluster = miniDfsClusterProvider.getIfAvailable();
+            if (cluster == null) {
+                return;
+            }
+            FileSystem fileSystem = fileSystemProvider.getIfAvailable();
+            if (fileSystem != null) {
+                fileSystem.close();
+            }
+            cluster.shutdownDataNodes();
+            cluster.shutdownNameNodes();
+        };
+    }
+
+    @Bean(destroyMethod = "close")
+    public FileSystem fileSystem(org.apache.hadoop.conf.Configuration configuration,
+                                 HdfsProps properties,
+                                 ObjectProvider<MiniDFSCluster> miniDfsClusterProvider) throws IOException {
+        MiniDFSCluster miniDfsCluster = miniDfsClusterProvider.getIfAvailable();
+        if (miniDfsCluster != null) {
+            return miniDfsCluster.getFileSystem();
+        }
+        try {
+            URI uri = URI.create(properties.getUri());
+            if (StringUtils.hasText(properties.getUser())) {
+                return FileSystem.get(uri, configuration, properties.getUser());
+            }
+            return FileSystem.get(uri, configuration);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while creating HDFS FileSystem client", exception);
+        }
+    }
+}
